@@ -13,12 +13,28 @@ const envSchema = z.object({
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string().min(1),
   DB_NAME: z.string().min(1),
+
+  // QuickBooks Online
+  QBO_CLIENT_ID: z.string().default(''),
+  QBO_CLIENT_SECRET: z.string().default(''),
+  QBO_REDIRECT_URI: z.string().default(''),
+  QBO_AUTH_URL: z.string().default(''),
+  QBO_TOKEN_URL: z.string().default(''),
+  QBO_API_BASE_URL: z.string().default(''),
+
+  // ServiceTitan
+  SERVICETITAN_CLIENT_ID: z.string().default(''),
+  SERVICETITAN_CLIENT_SECRET: z.string().default(''),
+  SERVICETITAN_APP_KEY: z.string().default(''),
+  SERVICETITAN_AUTH_URL: z.string().default(''),
+  SERVICETITAN_BASE_URL: z.string().default(''),
+  SERVICETITAN_TENANT_ID: z.string().default(''),
 });
 
 const _env = envSchema.safeParse(process.env);
 
 if (!_env.success) {
-  console.error('❌ Invalid environment variables:', _env.error.format());
+  console.error('? Invalid environment variables:', _env.error.format());
   process.exit(1);
 }
 
