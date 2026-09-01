@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { healthRouter } from './modules/health/health.routes';
+import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 
 const app = express();
@@ -18,6 +19,7 @@ app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
 
 // API Routes
 app.use('/health', healthRouter);
+app.use('/api/integrations/servicetitan', serviceTitanRouter);
 
 // Handle 404
 app.use(notFoundHandler);

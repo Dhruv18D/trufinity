@@ -38,8 +38,9 @@ export class ServiceTitanApiClient {
           logger.warn('[ServiceTitan] Rate limit exceeded');
         }
 
-        const errorText = await response.text();
-        throw new Error(`ServiceTitan API Error: [${response.status}] ${errorText}`);
+        // Provider response bodies can contain sensitive information. Keep the
+        // error deliberately limited to the HTTP status.
+        throw new Error(`ServiceTitan API Error: [${response.status}]`);
       }
 
       return (await response.json()) as T;

@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
+import { db } from '../../database';
 
 interface TokenResponse {
   access_token: string;
@@ -16,8 +18,27 @@ export interface QboTokenSet {
   refreshTokenExpiry: number;
 }
 
-class QboAuthService {
+export interface QboTokenStore {
+  save(tokens: QboTokenSet): Promise<void>;
+  load(): Promise<QboTokenSet | null>;
+  clear(): Promise<void>;
+}
+
+class PostgresQboTokenStore implements QboTokenStore {
+  public async save(tokens: QboTokenSet): Promise<void> {
+    await db('qbo_oauth_tokens').insert({ realm_id: tokens.realmId, access_token: tokens.accessToken, refresh_token: tokens.refreshToken, access_token_expiry: tokens.accessTokenExpiry, refresh_token_expiry: tokens.refreshTokenExpiry }).onConflict('realm_id').merge({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken, access_token_expiry: tokens.accessTokenExpiry, refresh_token_expiry: tokens.refreshTokenExpiry, updated_at: db.fn.now() });
+  }
+  public async load(): Promise<QboTokenSet | null> {
+    const row = await db('qbo_oauth_tokens').orderBy('updated_at', 'desc').first();
+    if (!row) return null;
+    return { accessToken: String(row.access_token), refreshToken: String(row.refresh_token), realmId: String(row.realm_id), accessTokenExpiry: Number(row.access_token_expiry), refreshTokenExpiry: Number(row.refresh_token_expiry) };
+  }
+  public async clear(): Promise<void> { await db('qbo_oauth_tokens').delete(); }
+}
+
+export class QboAuthService {
   private tokenSet: QboTokenSet | null = null;
+  public constructor(private readonly tokenStore: QboTokenStore = new PostgresQboTokenStore()) {}
   private EXPIRY_BUFFER_MS = 60 * 1000;
 
   public getAuthorizationUrl(): string {
@@ -48,13 +69,13 @@ class QboAuthService {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('[QuickBooks] Token exchange failed', { status: response.status, errorText });
+      await response.text();
+      logger.error('[QuickBooks] Token exchange failed', { status: response.status });
       throw new Error(`Failed to exchange code: ${response.status}`);
     }
 
     const data = (await response.json()) as TokenResponse;
-    this.saveTokenSet(data, realmId);
+    await this.saveTokenSet(data, realmId);
   }
 
   public async refreshAccessToken(): Promise<void> {
@@ -79,17 +100,18 @@ class QboAuthService {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      logger.error('[QuickBooks] Token refresh failed', { status: response.status, errorText });
-      this.clearCache(); // Force re-auth
+      await response.text();
+      logger.error('[QuickBooks] Token refresh failed', { status: response.status });
+      void this.clearCache(); // Force re-auth
       throw new Error(`Failed to refresh token: ${response.status}`);
     }
 
     const data = (await response.json()) as TokenResponse;
-    this.saveTokenSet(data, this.tokenSet.realmId);
+    await this.saveTokenSet(data, this.tokenSet.realmId);
   }
 
   public async getValidAccessToken(): Promise<{ accessToken: string, realmId: string }> {
+    this.tokenSet ??= await this.tokenStore.load();
     if (!this.tokenSet) {
       throw new Error('QuickBooks is not authenticated. Please authorize first.');
     }
@@ -113,7 +135,7 @@ class QboAuthService {
   }
 
   // Encapsulated setter to allow easy migration to DB later
-  private saveTokenSet(data: TokenResponse, realmId: string): void {
+  private async saveTokenSet(data: TokenResponse, realmId: string): Promise<void> {
     const now = Date.now();
     this.tokenSet = {
       accessToken: data.access_token,
@@ -122,11 +144,13 @@ class QboAuthService {
       accessTokenExpiry: now + (data.expires_in * 1000),
       refreshTokenExpiry: now + (data.x_refresh_token_expires_in * 1000)
     };
-    logger.info('[QuickBooks] Tokens saved successfully (in-memory)');
+    await this.tokenStore.save(this.tokenSet);
+    logger.info('[QuickBooks] Token state saved securely');
   }
 
-  public clearCache(): void {
+  public async clearCache(): Promise<void> {
     this.tokenSet = null;
+    await this.tokenStore.clear();
   }
 }
 

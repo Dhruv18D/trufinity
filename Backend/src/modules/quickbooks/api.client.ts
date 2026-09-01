@@ -30,16 +30,17 @@ export class QboApiClient {
         if (response.status === 401) {
           logger.warn('[QuickBooks] Token unauthorized during API call. Clearing cache.');
           // In a more robust system, we could auto-retry the refresh here once.
-          qboAuthService.clearCache();
+          void qboAuthService.clearCache();
         }
 
-        const errorText = await response.text();
-        throw new Error(`QuickBooks API Error: [${response.status}] ${errorText}`);
+        await response.text();
+        throw new Error(`QuickBooks API Error: [${response.status}]`);
       }
 
       return (await response.json()) as T;
     } catch (error) {
-      logger.error(`[QuickBooks] GET ${endpoint} failed`, error);
+      const statusMatch = error instanceof Error ? /\[(\d{3})\]/.exec(error.message) : null;
+      logger.error(`[QuickBooks] GET ${endpoint} failed`, { status: statusMatch?.[1] });
       throw error;
     }
   }

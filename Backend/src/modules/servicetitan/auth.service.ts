@@ -37,8 +37,7 @@ class AuthService {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        logger.error('[ServiceTitan] Token request failed', { status: response.status, errorText });
+        logger.error('[ServiceTitan] Token request failed', { status: response.status });
         throw new Error(`Failed to fetch ServiceTitan token: ${response.status}`);
       }
 
