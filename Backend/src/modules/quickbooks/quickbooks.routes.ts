@@ -11,7 +11,13 @@ import { logger } from '../../utils/logger';
 
 const router = Router();
 
-// Middleware to restrict routes to development only
+interface CompanyInfoApiResponse {
+  CompanyInfo?: {
+    CompanyName?: string;
+  };
+}
+
+// Diagnostic/data routes remain development-only until application authentication is added.
 const devOnly = (_req: Request, res: Response, next: NextFunction) => {
   if (env.NODE_ENV !== 'development') {
     res.status(403).json({ error: 'Integration endpoints are only available in development mode' });
@@ -19,8 +25,6 @@ const devOnly = (_req: Request, res: Response, next: NextFunction) => {
   }
   next();
 };
-
-router.use(devOnly);
 
 // 1. Generate Auth URL and redirect user to Intuit
 router.get('/authorize', (_req, res) => {
@@ -34,11 +38,17 @@ router.get('/callback', async (req, res, next) => {
   try {
     const code = req.query.code as string;
     const realmId = req.query.realmId as string;
+    const state = req.query.state as string;
     const error = req.query.error as string;
 
+    if (!state || !qboAuthService.consumeAuthorizationState(state)) {
+      res.status(400).json({ status: 'error', message: 'Invalid or expired OAuth state.' });
+      return;
+    }
+
     if (error) {
-      logger.error('[QuickBooks] Authorization failed', { error });
-      res.status(400).json({ status: 'error', message: 'User denied authorization or an error occurred.', detail: error });
+      logger.error('[QuickBooks] Authorization failed');
+      res.status(400).json({ status: 'error', message: 'User denied authorization or an error occurred.' });
       return;
     }
 
@@ -52,7 +62,7 @@ router.get('/callback', async (req, res, next) => {
 
     // Verify connection by calling CompanyInfo
     logger.info('[QuickBooks] Verifying connection via CompanyInfo API');
-    const companyInfoResponse = await qboApiClient.get<any>(`/v3/company/${realmId}/companyinfo/${realmId}`);
+    const companyInfoResponse = await qboApiClient.get<CompanyInfoApiResponse>(`/v3/company/${realmId}/companyinfo/${realmId}`);
 
     res.json({
       status: 'success',
@@ -63,6 +73,22 @@ router.get('/callback', async (req, res, next) => {
     next(err);
   }
 });
+
+// Intuit disconnect/revoke endpoint. OAuth routes remain available in production.
+router.get('/disconnect', async (_req, res, next) => {
+  try {
+    const disconnected = await qboAuthService.disconnect();
+    res.json({
+      status: 'success',
+      message: disconnected ? 'QuickBooks disconnected successfully.' : 'No QuickBooks connection was found.',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Diagnostic/data routes are not exposed when NODE_ENV=production.
+router.use(devOnly);
 
 // Data Services (Diagnostic)
 router.get('/companyinfo', async (_req, res, next) => {

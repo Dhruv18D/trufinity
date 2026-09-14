@@ -3,8 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { healthRouter } from './modules/health/health.routes';
-import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
+import { quickbooksRouter } from './modules/quickbooks/quickbooks.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
+import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
 
 const app = express();
 
@@ -14,12 +15,21 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging (use 'dev' format in development)
-app.use(morgan(process.env.NODE_ENV === 'development' ? 'dev' : 'combined'));
+// Request logging excludes query strings so OAuth authorization codes are not logged.
+app.use(morgan((tokens, req, res) => [
+  tokens.method(req, res),
+  req.path,
+  tokens.status(req, res),
+  tokens.res(req, res, 'content-length'),
+  '-',
+  tokens['response-time'](req, res),
+  'ms',
+].join(' ')));
 
 // API Routes
 app.use('/health', healthRouter);
 app.use('/api/integrations/servicetitan', serviceTitanRouter);
+app.use('/api/integrations/quickbooks', quickbooksRouter);
 
 // Handle 404
 app.use(notFoundHandler);

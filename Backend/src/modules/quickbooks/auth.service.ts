@@ -2,6 +2,7 @@
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
 import { db } from '../../database';
+import { randomBytes } from 'node:crypto';
 
 interface TokenResponse {
   access_token: string;
@@ -38,15 +39,56 @@ class PostgresQboTokenStore implements QboTokenStore {
 
 export class QboAuthService {
   private tokenSet: QboTokenSet | null = null;
+  private readonly pendingStates = new Map<string, number>();
   public constructor(private readonly tokenStore: QboTokenStore = new PostgresQboTokenStore()) {}
   private EXPIRY_BUFFER_MS = 60 * 1000;
+  private OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
   public getAuthorizationUrl(): string {
     const scope = encodeURIComponent('com.intuit.quickbooks.accounting');
     const redirectUri = encodeURIComponent(env.QBO_REDIRECT_URI);
-    const state = 'security_token_' + Math.random().toString(36).substring(7); // Basic CSRF protection mock
+    const state = randomBytes(32).toString('hex');
+    const expiresAt = Date.now() + this.OAUTH_STATE_TTL_MS;
+    this.removeExpiredStates();
+    this.pendingStates.set(state, expiresAt);
     
     return `${env.QBO_AUTH_URL}?client_id=${env.QBO_CLIENT_ID}&response_type=code&scope=${scope}&redirect_uri=${redirectUri}&state=${state}`;
+  }
+
+  public consumeAuthorizationState(state: string): boolean {
+    const expiresAt = this.pendingStates.get(state);
+    this.pendingStates.delete(state);
+    return typeof expiresAt === 'number' && expiresAt > Date.now();
+  }
+
+  public async disconnect(): Promise<boolean> {
+    const stored = await this.tokenStore.load();
+    if (!stored) {
+      this.tokenSet = null;
+      return false;
+    }
+
+    const authHeader = Buffer.from(`${env.QBO_CLIENT_ID}:${env.QBO_CLIENT_SECRET}`).toString('base64');
+    const response = await fetch(env.QBO_REVOKE_URL, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${authHeader}`,
+      },
+      body: new URLSearchParams({ token: stored.refreshToken }),
+    });
+
+    if (!response.ok) {
+      await response.text();
+      logger.error('[QuickBooks] Token revocation failed', { status: response.status });
+      throw new Error('QuickBooks disconnect failed.');
+    }
+
+    this.tokenSet = null;
+    await this.tokenStore.clear();
+    logger.info('[QuickBooks] QuickBooks connection disconnected');
+    return true;
   }
 
   public async exchangeCodeForToken(code: string, realmId: string): Promise<void> {
@@ -151,6 +193,13 @@ export class QboAuthService {
   public async clearCache(): Promise<void> {
     this.tokenSet = null;
     await this.tokenStore.clear();
+  }
+
+  private removeExpiredStates(): void {
+    const now = Date.now();
+    for (const [state, expiresAt] of this.pendingStates.entries()) {
+      if (expiresAt <= now) this.pendingStates.delete(state);
+    }
   }
 }
 
