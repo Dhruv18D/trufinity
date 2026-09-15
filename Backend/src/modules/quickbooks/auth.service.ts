@@ -40,6 +40,7 @@ class PostgresQboTokenStore implements QboTokenStore {
 export class QboAuthService {
   private tokenSet: QboTokenSet | null = null;
   private readonly pendingStates = new Map<string, number>();
+  private refreshInFlight: Promise<void> | null = null;
   public constructor(private readonly tokenStore: QboTokenStore = new PostgresQboTokenStore()) {}
   private EXPIRY_BUFFER_MS = 60 * 1000;
   private OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
@@ -121,6 +122,18 @@ export class QboAuthService {
   }
 
   public async refreshAccessToken(): Promise<void> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+
+    const refreshOperation = this.performAccessTokenRefresh();
+    this.refreshInFlight = refreshOperation;
+    try {
+      await refreshOperation;
+    } finally {
+      if (this.refreshInFlight === refreshOperation) this.refreshInFlight = null;
+    }
+  }
+
+  private async performAccessTokenRefresh(): Promise<void> {
     if (!this.tokenSet?.refreshToken) {
       throw new Error('No refresh token available. User must re-authorize.');
     }
@@ -144,7 +157,6 @@ export class QboAuthService {
     if (!response.ok) {
       await response.text();
       logger.error('[QuickBooks] Token refresh failed', { status: response.status });
-      void this.clearCache(); // Force re-auth
       throw new Error(`Failed to refresh token: ${response.status}`);
     }
 
@@ -179,14 +191,15 @@ export class QboAuthService {
   // Encapsulated setter to allow easy migration to DB later
   private async saveTokenSet(data: TokenResponse, realmId: string): Promise<void> {
     const now = Date.now();
-    this.tokenSet = {
+    const updatedTokenSet: QboTokenSet = {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
       realmId: realmId,
       accessTokenExpiry: now + (data.expires_in * 1000),
       refreshTokenExpiry: now + (data.x_refresh_token_expires_in * 1000)
     };
-    await this.tokenStore.save(this.tokenSet);
+    await this.tokenStore.save(updatedTokenSet);
+    this.tokenSet = updatedTokenSet;
     logger.info('[QuickBooks] Token state saved securely');
   }
 
