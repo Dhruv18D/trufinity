@@ -21,6 +21,7 @@ const envSchema = z.object({
   QBO_AUTH_URL: z.string().default(''),
   QBO_TOKEN_URL: z.string().default(''),
   QBO_REVOKE_URL: z.string().default('https://developer.api.intuit.com/v2/oauth2/tokens/revoke'),
+  QBO_DISCONNECT_AUTH_TOKEN: z.string().default(''),
   QBO_API_BASE_URL: z.string().default(''),
 
   // ServiceTitan
