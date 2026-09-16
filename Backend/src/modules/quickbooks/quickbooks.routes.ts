@@ -8,6 +8,7 @@ import { qboInvoiceService } from './services/invoice.service';
 import { qboPaymentService } from './services/payment.service';
 import { qboAccountService } from './services/account.service';
 import { logger } from '../../utils/logger';
+import { timingSafeEqual } from 'node:crypto';
 
 const router = Router();
 
@@ -23,6 +24,28 @@ const devOnly = (_req: Request, res: Response, next: NextFunction) => {
     res.status(403).json({ error: 'Integration endpoints are only available in development mode' });
     return;
   }
+  next();
+};
+
+const requireDisconnectAuthorization = (req: Request, res: Response, next: NextFunction): void => {
+  const expected = env.QBO_DISCONNECT_AUTH_TOKEN;
+  const authorization = req.get('authorization') ?? '';
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  const supplied = match?.[1] ?? '';
+
+  if (!expected || Buffer.byteLength(expected, 'utf8') < 32) {
+    res.status(503).json({ status: 'error', message: 'QuickBooks disconnect is not configured.' });
+    return;
+  }
+
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(supplied);
+  const authorized = suppliedBuffer.length === expectedBuffer.length && timingSafeEqual(suppliedBuffer, expectedBuffer);
+  if (!authorized) {
+    res.status(401).json({ status: 'error', message: 'Unauthorized.' });
+    return;
+  }
+
   next();
 };
 
@@ -74,8 +97,14 @@ router.get('/callback', async (req, res, next) => {
   }
 });
 
-// Intuit disconnect/revoke endpoint. OAuth routes remain available in production.
-router.get('/disconnect', async (_req, res, next) => {
+// Never allow a browser/crawler GET to revoke the production connection.
+router.get('/disconnect', (_req, res) => {
+  res.setHeader('Allow', 'POST');
+  res.status(405).json({ status: 'error', message: 'Use an authorized POST request to disconnect QuickBooks.' });
+});
+
+// Intuit disconnect/revoke endpoint. Requires a server-configured admin bearer secret.
+router.post('/disconnect', requireDisconnectAuthorization, async (_req, res, next) => {
   try {
     const disconnected = await qboAuthService.disconnect();
     res.json({
