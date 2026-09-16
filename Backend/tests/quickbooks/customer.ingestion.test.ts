@@ -37,4 +37,21 @@ describe('QBO Customer raw ingestion', () => {
     expect(loggedDiagnostic).not.toContain('refreshToken');
     logSpy.mockRestore();
   });
+  it('treats an omitted Customer property in a valid QueryResponse as the empty final page', async () => {
+    await db('raw_sync_metadata').insert({ source_system: 'QuickBooks', entity_type: 'Customers', continuation_token: '7729' });
+    const api = { getCustomersPage: jest.fn<(position: number, size: number) => Promise<any>>() .mockResolvedValue({ QueryResponse: { startPosition: 7729, maxResults: 1000, totalCount: 7728 }, time: 't' }) };
+    const result = await new QboCustomerIngestionService(api).run();
+    expect(api.getCustomersPage).toHaveBeenCalledWith(7729, 1000);
+    expect(result.recordsProcessed).toBe(0);
+    const metadata = await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Customers' }).first();
+    expect(metadata.continuation_token).toBeNull();
+    expect(await db('raw_qbo_customers')).toHaveLength(0);
+  });
+
+  it('rejects a missing QueryResponse and a non-array Customer value', async () => {
+    for (const response of [{}, { QueryResponse: { Customer: {} } }]) {
+      const api = { getCustomersPage: jest.fn<(position: number, size: number) => Promise<any>>().mockResolvedValue(response) };
+      await expect(new QboCustomerIngestionService(api).run()).rejects.toThrow('QuickBooks Customers ingestion failed.');
+    }
+  });
 });
