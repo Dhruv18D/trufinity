@@ -5,6 +5,8 @@ import { logger } from '../../../utils/logger';
 import { qboCustomerService } from '../services/customer.service';
 import type { QboCustomer, QboQueryResponse } from '../types';
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const PAGE_SIZE = 1000;
 const MAX_ATTEMPTS = 3;
 interface CustomerApi { getCustomersPage(position: number, maxResults: number): Promise<QboQueryResponse<QboCustomer>>; }
@@ -74,16 +76,27 @@ export class QboCustomerIngestionService {
         const response = await this.fetchPage(position);
         stage = 'validate_page';
         const page = response.QueryResponse;
-        if (!page || !Array.isArray(page.Customer)) throw new Error('Malformed QuickBooks Customer response.');
+        if (!isRecord(page)) throw new Error('Malformed QuickBooks Customer response.');
+        const customerValue = page.Customer;
+        if (customerValue === undefined) {
+          const allowedEmptyPageKeys = new Set(['startPosition', 'maxResults', 'totalCount']);
+          if (Object.keys(page).some((key) => !allowedEmptyPageKeys.has(key))) throw new Error('Malformed QuickBooks Customer response.');
+          hasMore = false;
+          stage = 'advance_pagination_metadata';
+          await this.database('raw_sync_metadata').insert({ source_system: 'QuickBooks', entity_type: 'Customers', continuation_token: null, last_synced_at: this.database.fn.now() }).onConflict(['source_system', 'entity_type']).merge({ continuation_token: null, last_synced_at: this.database.fn.now() });
+          continue;
+        }
+        if (!Array.isArray(customerValue)) throw new Error('Malformed QuickBooks Customer response.');
+        const customers = customerValue as QboCustomer[];
         const valid: { id: string; payload: QboCustomer }[] = []; const invalid: unknown[] = [];
-        for (const payload of page.Customer) { const id = payload && typeof payload.Id === 'string' && payload.Id.trim() ? payload.Id : null; if (id) valid.push({ id, payload }); else invalid.push(payload); }
+        for (const payload of customers) { const id = payload && typeof payload.Id === 'string' && payload.Id.trim() ? payload.Id : null; if (id) valid.push({ id, payload }); else invalid.push(payload); }
         stage = 'persist_page_transaction';
         await this.database.transaction(async (trx) => {
           for (const record of valid) { await trx('raw_qbo_customers').where({ source_id: record.id, is_latest: true }).update({ is_latest: false }); await trx('raw_qbo_customers').insert({ source_id: record.id, payload: record.payload, is_latest: true, sync_run_id: runId }); }
           if (invalid.length) await trx('sync_errors').insert(invalid.map((payload) => ({ sync_run_id: runId, source_id: null, error_message: 'Customer payload is missing a valid Id.', payload })));
         });
-        processed += valid.length; const max = page.maxResults ?? PAGE_SIZE; hasMore = page.totalCount !== undefined ? position + page.Customer.length <= page.totalCount : page.Customer.length === max;
-        position += page.Customer.length;
+        processed += valid.length; const max = page.maxResults ?? PAGE_SIZE; hasMore = page.totalCount !== undefined ? position + customers.length <= page.totalCount : customers.length === max;
+        position += customers.length;
         stage = 'advance_pagination_metadata';
         await this.database('raw_sync_metadata').insert({ source_system: 'QuickBooks', entity_type: 'Customers', continuation_token: hasMore ? String(position) : null, last_synced_at: this.database.fn.now() }).onConflict(['source_system', 'entity_type']).merge({ continuation_token: hasMore ? String(position) : null, last_synced_at: this.database.fn.now() });
       }
