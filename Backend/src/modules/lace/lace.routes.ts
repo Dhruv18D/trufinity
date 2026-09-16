@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { env } from '../../config/env';
 import { laceCallAnalysisIngestionService } from './ingestion/call-analysis.ingestion';
 import { laceAgentPerformanceIngestionService } from './ingestion/agent-performance.ingestion';
+import { callAnalysisCanonicalService } from './canonical/call-analysis.canonical.service';
 
 const router = Router();
 
@@ -29,6 +30,15 @@ router.post('/sync/call-analysis', async (_req, res, next) => {
 router.post('/sync/agent-performance', async (_req, res, next) => {
   try {
     const result = await laceAgentPerformanceIngestionService.run();
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/sync/call-analysis-canonical', async (_req, res, next) => {
+  try {
+    const result = await callAnalysisCanonicalService.sync();
     res.json(result);
   } catch (err) {
     next(err);

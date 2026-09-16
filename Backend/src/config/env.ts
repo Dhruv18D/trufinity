@@ -39,6 +39,10 @@ const envSchema = z.object({
   LACE_S3_SECRET_ACCESS_KEY: z.string().default(''),
   LACE_S3_CALL_ANALYSIS_PREFIX: z.string().default(''),
   LACE_S3_AGENT_PERFORMANCE_PREFIX: z.string().default(''),
+  // Cron expressions for the automated sync schedule. Defaults: Call Analysis
+  // daily at 02:00, Agent Performance monthly on the 1st at 03:00 (server time).
+  LACE_CALL_ANALYSIS_CRON: z.string().default('0 2 * * *'),
+  LACE_AGENT_PERFORMANCE_CRON: z.string().default('0 3 1 * *'),
 });
 
 const _env = envSchema.safeParse(process.env);
