@@ -30,6 +30,14 @@ const envSchema = z.object({
   SERVICETITAN_AUTH_URL: z.string().default(''),
   SERVICETITAN_BASE_URL: z.string().default(''),
   SERVICETITAN_TENANT_ID: z.string().default(''),
+
+  // Lace AI (batch export via S3 - no public API, see Section 4.1 of SPEC-BI-001)
+  LACE_S3_BUCKET: z.string().default(''),
+  LACE_S3_REGION: z.string().default(''),
+  LACE_S3_ACCESS_KEY_ID: z.string().default(''),
+  LACE_S3_SECRET_ACCESS_KEY: z.string().default(''),
+  LACE_S3_CALL_ANALYSIS_PREFIX: z.string().default(''),
+  LACE_S3_AGENT_PERFORMANCE_PREFIX: z.string().default(''),
 });
 
 const _env = envSchema.safeParse(process.env);
