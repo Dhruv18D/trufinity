@@ -2,7 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { env } from '../../src/config/env';
-import { QboAuthService, type QboTokenSet, type QboTokenStore, qboAuthService } from '../../src/modules/quickbooks/auth.service';
+import { QboAuthService, type QboRefreshLock, type QboTokenSet, type QboTokenStore, qboAuthService } from '../../src/modules/quickbooks/auth.service';
 import { quickbooksRouter } from '../../src/modules/quickbooks/quickbooks.routes';
 
 class MemoryTokenStore implements QboTokenStore {
@@ -12,6 +12,8 @@ class MemoryTokenStore implements QboTokenStore {
   public async load(): Promise<QboTokenSet | null> { return this.tokens ? { ...this.tokens } : null; }
   public async clear(): Promise<void> { this.tokens = null; }
 }
+
+const noContentionLock: QboRefreshLock = { acquire: async () => async () => undefined };
 
 const originalFetch = global.fetch;
 const originalDisconnectToken = env.QBO_DISCONNECT_AUTH_TOKEN;
@@ -52,7 +54,7 @@ describe('QuickBooks OAuth token lifecycle', () => {
       refreshTokenExpiry: Date.now() + 86_400_000,
     };
     const tokenStore = new MemoryTokenStore(stored);
-    const service = new QboAuthService(tokenStore);
+    const service = new QboAuthService(tokenStore, noContentionLock);
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
       ok: false,
       status: 503,
@@ -71,7 +73,7 @@ describe('QuickBooks OAuth token lifecycle', () => {
       accessTokenExpiry: Date.now() + 60_000,
       refreshTokenExpiry: Date.now() + 86_400_000,
     });
-    const service = new QboAuthService(tokenStore);
+    const service = new QboAuthService(tokenStore, noContentionLock);
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({ ok: true, status: 200 } as Response);
 
     await expect(service.disconnect()).resolves.toBe(true);
@@ -86,7 +88,7 @@ describe('QuickBooks OAuth token lifecycle', () => {
       accessTokenExpiry: Date.now() - 1,
       refreshTokenExpiry: Date.now() + 86_400_000,
     });
-    const service = new QboAuthService(tokenStore);
+    const service = new QboAuthService(tokenStore, noContentionLock);
     const beforeRefresh = Date.now();
     global.fetch = jest.fn<typeof fetch>().mockResolvedValue({
       ok: true,
