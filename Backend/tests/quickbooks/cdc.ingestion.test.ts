@@ -1,7 +1,8 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { QboApiError } from '../../src/modules/quickbooks/api.client';
 import {
-  parseQboCdcResponse, QboCdcIngestionService,
+  formatQboCdcValidationDiagnostic, parseQboCdcResponse, QboCdcIngestionService,
+  QboCdcLimitError, QboCdcProviderBoundaryError, QboCdcResponseError,
   type QboCdcCheckpoint, type QboCdcEvent, type QboCdcRunRuntime,
 } from '../../src/modules/quickbooks/ingestion/cdc.ingestion';
 import type { QboCdcEntity } from '../../src/modules/quickbooks/types';
@@ -26,6 +27,7 @@ class MemoryRuntime implements QboCdcRunRuntime {
   public runStatus: 'RUNNING' | 'COMPLETED' | 'FAILED' | null = null;
   public runCount = 0;
   public recoveryCalls = 0;
+  public failureMessages: string[] = [];
   public async acquireLocks(): Promise<(() => Promise<void>) | null> { return this.locked ? async () => undefined : null; }
   public async recoverStaleRuns(): Promise<void> { this.recoveryCalls += 1; }
   public async createRun(): Promise<string> { this.runCount += 1; this.runStatus = 'RUNNING'; return 'run-1'; }
@@ -41,10 +43,71 @@ class MemoryRuntime implements QboCdcRunRuntime {
     for (const checkpoint of checkpoints) this.checkpoints.set(checkpoint.entity, { checkpointAt: checkpoint.checkpointAt, origin: 'cdc' });
     this.runStatus = 'COMPLETED';
   }
-  public async failRun(): Promise<void> { this.runStatus = 'FAILED'; }
+  public async failRun(_id: string, message: string): Promise<void> { this.failureMessages.push(message); this.runStatus = 'FAILED'; }
 }
 
 describe('QBO CDC response validation and isolated orchestration', () => {
+  it('classifies unsupported fields without accepting them or exposing response content', () => {
+    const raw = response([group({ Invoice: [item('invoice-1')], totalCount: 1, secret: 'must-not-appear' })]);
+    try {
+      parseQboCdcResponse(raw, ['Invoice']);
+      throw new Error('Expected parser rejection.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(QboCdcResponseError);
+      expect((error as QboCdcResponseError).reason).toBe('UNSUPPORTED_QUERY_FIELD');
+      expect((error as QboCdcResponseError).details).toMatchObject({ groupIndex: 0, queryIndex: 0, field: 'totalCount' });
+      const diagnostic = formatQboCdcValidationDiagnostic(error);
+      expect(diagnostic).toBe('reason=UNSUPPORTED_QUERY_FIELD, groupIndex=0, queryIndex=0, field=totalCount');
+      expect(diagnostic).not.toContain('invoice-1');
+      expect(diagnostic).not.toContain('must-not-appear');
+    }
+  });
+
+  it('classifies malformed envelopes and provider timestamps', () => {
+    for (const [input, reason] of [
+      [{}, 'INVALID_ENVELOPE'],
+      [{ CDCResponse: [], time: 'not-a-date' }, 'INVALID_PROVIDER_TIME'],
+    ] as const) {
+      try {
+        parseQboCdcResponse(input, ['Invoice']);
+        throw new Error('Expected parser rejection.');
+      } catch (error) {
+        expect(error).toBeInstanceOf(QboCdcResponseError);
+        expect((error as QboCdcResponseError).reason).toBe(reason);
+      }
+    }
+  });
+
+  it('classifies invalid records without including record contents in diagnostics', () => {
+    const sensitiveRecord = { DisplayName: 'private name', PrimaryEmailAddr: { Address: 'private@example.test' }, Authorization: 'Bearer token-value' };
+    try {
+      parseQboCdcResponse(response([group({ Invoice: [sensitiveRecord] })]), ['Invoice']);
+      throw new Error('Expected parser rejection.');
+    } catch (error) {
+      const diagnostic = formatQboCdcValidationDiagnostic(error);
+      expect(diagnostic).toBe('reason=MISSING_ID, entity=Invoice, groupIndex=0, queryIndex=0');
+      expect(diagnostic).not.toMatch(/private|Bearer|token-value|DisplayName|PrimaryEmailAddr|Authorization/);
+    }
+  });
+
+  it('keeps object-limit and provider-boundary reasons distinct', () => {
+    expect(formatQboCdcValidationDiagnostic(new QboCdcLimitError(1000))).toBe('reason=OBJECT_LIMIT_REACHED, objectCount=1000');
+    expect(formatQboCdcValidationDiagnostic(new QboCdcProviderBoundaryError())).toBe('reason=PROVIDER_TIME_BEFORE_CHECKPOINT, providerBeforeCheckpoint=true');
+  });
+
+  it('persists a concise safe diagnostic and leaves checkpoint/raw persistence unchanged on validation failure', async () => {
+    const runtime = new MemoryRuntime();
+    runtime.checkpoints.set('Invoice', { checkpointAt: base, origin: 'historical' });
+    const before = runtime.checkpoints.get('Invoice')?.checkpointAt.toISOString();
+    const api = makeApi(async () => response([group({ Invoice: [item('i-1')], totalCount: 1 })]));
+    await expect(new QboCdcIngestionService(api, runtime, () => Date.parse(boundary), async () => undefined).run(['Invoice'])).rejects.toThrow('QuickBooks CDC synchronization failed.');
+    expect(runtime.failureMessages).toEqual([
+      'QuickBooks CDC failed during validate_response (reason=UNSUPPORTED_QUERY_FIELD, groupIndex=0, queryIndex=0, field=totalCount).',
+    ]);
+    expect(runtime.checkpoints.get('Invoice')?.checkpointAt.toISOString()).toBe(before);
+    expect(runtime.rows).toHaveLength(0);
+  });
+
   it('parses multiple entity groups, active/deleted rows, and an empty response', () => {
     const parsed = parseQboCdcResponse(response([
       group({ Customer: [item('c-1')] }),
@@ -129,11 +192,26 @@ describe('QBO CDC response validation and isolated orchestration', () => {
     expect(runtime.checkpoints.get('Customer')?.checkpointAt.toISOString()).toBe(before);
     expect(runtime.rows).toHaveLength(0);
     expect(capped.getChanges).toHaveBeenCalledTimes(1);
+    expect(runtime.failureMessages[0]).toBe('QuickBooks CDC failed during validate_response (reason=OBJECT_LIMIT_REACHED, objectCount=1000).');
+
+    runtime.failureMessages = [];
 
     runtime.checkpoints.set('Customer', { checkpointAt: new Date('2026-07-01T00:00:00Z'), origin: 'cdc' });
     const api = makeApi(async () => { throw new Error('should not be called'); });
     await expect(new QboCdcIngestionService(api, runtime, () => Date.parse(boundary), async () => undefined).run(['Customer'])).rejects.toThrow('QuickBooks CDC synchronization failed.');
     expect(api.getChanges).not.toHaveBeenCalled();
+  });
+
+  it('classifies provider time before checkpoint without advancing it', async () => {
+    const runtime = new MemoryRuntime();
+    const before = runtime.checkpoints.get('Customer')?.checkpointAt.toISOString();
+    const api = makeApi(async () => response([], '2026-09-14T12:00:00.000Z'));
+    await expect(new QboCdcIngestionService(api, runtime, () => Date.parse(boundary), async () => undefined).run(['Customer'])).rejects.toThrow();
+    expect(runtime.failureMessages).toEqual([
+      'QuickBooks CDC failed during validate_response (reason=PROVIDER_TIME_BEFORE_CHECKPOINT, providerBeforeCheckpoint=true).',
+    ]);
+    expect(runtime.checkpoints.get('Customer')?.checkpointAt.toISOString()).toBe(before);
+    expect(runtime.rows).toHaveLength(0);
   });
 
   it('retries transient errors but does not retry permanent HTTP failures', async () => {
