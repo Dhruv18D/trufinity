@@ -27,7 +27,7 @@ const config: Record<string, Knex.Config> = {
       ssl: { rejectUnauthorized: false }, // Useful for managed DBs
     },
     migrations: {
-      directory: './migrations',
+      directory: '../../migrations',
       extension: 'js',
     },
   },
