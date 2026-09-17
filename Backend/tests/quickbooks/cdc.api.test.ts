@@ -21,7 +21,8 @@ describe('QBO CDC API client', () => {
 
   it('does not clear durable OAuth tokens after a CDC 401 response', async () => {
     jest.spyOn(qboAuthService, 'getValidAccessToken').mockResolvedValue({ accessToken: 'test-access-token', realmId: 'realm-1' });
-    const clear = jest.spyOn(qboAuthService, 'clearCache').mockResolvedValue();
+    jest.spyOn(qboAuthService, 'refreshAccessToken').mockRejectedValue(new Error('mocked refresh failure'));
+    const clear = jest.spyOn(qboAuthService, 'clearCache');
     jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 401, text: async () => 'sensitive provider body' } as Response);
     await expect(new QboApiClient().getCdc(['Customer'], '2026-09-16T11:58:00Z')).rejects.toBeInstanceOf(QboApiError);
     expect(clear).not.toHaveBeenCalled();
