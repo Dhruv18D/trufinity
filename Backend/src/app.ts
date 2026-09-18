@@ -7,6 +7,7 @@ import { quickbooksRouter } from './modules/quickbooks/quickbooks.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
 import { laceRouter } from './modules/lace/lace.routes';
+import { detectRouter } from './modules/detect/detect.routes';
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use('/health', healthRouter);
 app.use('/api/integrations/servicetitan', serviceTitanRouter);
 app.use('/api/integrations/quickbooks', quickbooksRouter);
 app.use('/api/integrations/lace', laceRouter);
+app.use('/api/detect', detectRouter);
 
 // Handle 404
 app.use(notFoundHandler);
