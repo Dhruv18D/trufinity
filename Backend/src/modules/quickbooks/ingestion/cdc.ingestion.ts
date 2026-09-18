@@ -34,6 +34,7 @@ export type QboCdcValidationReason =
   | 'INVALID_QUERY_RESPONSE'
   | 'INVALID_START_POSITION'
   | 'INVALID_MAX_RESULTS'
+  | 'INVALID_TOTAL_COUNT'
   | 'UNEXPECTED_ENTITY'
   | 'INVALID_ENTITY_ARRAY'
   | 'MISSING_ID'
@@ -129,6 +130,9 @@ export const parseQboCdcResponse = (input: unknown, requestedEntities: QboCdcEnt
       if (query.maxResults !== undefined && (!Number.isInteger(query.maxResults) || Number(query.maxResults) < 0)) {
         throw new QboCdcResponseError('Malformed CDC maxResults.', 'INVALID_MAX_RESULTS', { ...position, field: 'maxResults' });
       }
+      if (query.totalCount !== undefined && (typeof query.totalCount !== 'number' || !Number.isInteger(query.totalCount) || query.totalCount < 0)) {
+        throw new QboCdcResponseError('Malformed CDC totalCount.', 'INVALID_TOTAL_COUNT', { ...position, field: 'totalCount' });
+      }
       for (const entity of QBO_CDC_ENTITIES) {
         if (!(entity in query)) continue;
         if (!allowed.has(entity)) throw new QboCdcResponseError('CDC returned an unrequested entity.', 'UNEXPECTED_ENTITY', { ...position, entity });
@@ -145,7 +149,7 @@ export const parseQboCdcResponse = (input: unknown, requestedEntities: QboCdcEnt
         }
       }
       for (const key of Object.keys(query)) {
-        if (!['Customer', 'Account', 'Invoice', 'Payment', 'startPosition', 'maxResults'].includes(key)) throw new QboCdcResponseError('CDC query response contains an unsupported field.', 'UNSUPPORTED_QUERY_FIELD', { ...position, field: key });
+        if (!['Customer', 'Account', 'Invoice', 'Payment', 'startPosition', 'maxResults', 'totalCount'].includes(key)) throw new QboCdcResponseError('CDC query response contains an unsupported field.', 'UNSUPPORTED_QUERY_FIELD', { ...position, field: key });
       }
     }
   }

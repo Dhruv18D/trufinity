@@ -47,6 +47,37 @@ class MemoryRuntime implements QboCdcRunRuntime {
 }
 
 describe('QBO CDC response validation and isolated orchestration', () => {
+  it('accepts valid totalCount metadata without adding it to parsed events', () => {
+    const parsed = parseQboCdcResponse(response([group({ Invoice: [item('i-1')], totalCount: 18 })]), ['Invoice']);
+    expect(parsed.events).toHaveLength(1);
+    expect(parsed.events[0].sourceId).toBe('i-1');
+    expect(parsed.events.some((event) => event.sourceId === '18')).toBe(false);
+  });
+
+  it('accepts totalCount zero for an empty response', () => {
+    expect(parseQboCdcResponse(response([group({ totalCount: 0 })]), ['Invoice']).events).toEqual([]);
+  });
+
+  it.each([-1, 1.5, '2'])('rejects invalid totalCount value %s', (totalCount) => {
+    expect(() => parseQboCdcResponse(response([group({ totalCount })]), ['Invoice'])).toThrow(QboCdcResponseError);
+    try {
+      parseQboCdcResponse(response([group({ totalCount })]), ['Invoice']);
+    } catch (error) {
+      expect((error as QboCdcResponseError).reason).toBe('INVALID_TOTAL_COUNT');
+      expect(formatQboCdcValidationDiagnostic(error)).toContain('field=totalCount');
+    }
+  });
+
+  it('continues to reject unrecognized QueryResponse metadata fields', () => {
+    try {
+      parseQboCdcResponse(response([group({ totalCount: 1, unknownMetadata: true })]), ['Invoice']);
+      throw new Error('Expected parser rejection.');
+    } catch (error) {
+      expect((error as QboCdcResponseError).reason).toBe('UNSUPPORTED_QUERY_FIELD');
+      expect(formatQboCdcValidationDiagnostic(error)).toContain('field=unknownMetadata');
+    }
+  });
+
   it('classifies unsupported fields without accepting them or exposing response content', () => {
     const raw = response([group({ Invoice: [item('invoice-1')], totalCount: 1, secret: 'must-not-appear' })]);
     try {
@@ -55,9 +86,9 @@ describe('QBO CDC response validation and isolated orchestration', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(QboCdcResponseError);
       expect((error as QboCdcResponseError).reason).toBe('UNSUPPORTED_QUERY_FIELD');
-      expect((error as QboCdcResponseError).details).toMatchObject({ groupIndex: 0, queryIndex: 0, field: 'totalCount' });
+      expect((error as QboCdcResponseError).details).toMatchObject({ groupIndex: 0, queryIndex: 0, field: 'secret' });
       const diagnostic = formatQboCdcValidationDiagnostic(error);
-      expect(diagnostic).toBe('reason=UNSUPPORTED_QUERY_FIELD, groupIndex=0, queryIndex=0, field=totalCount');
+      expect(diagnostic).toBe('reason=UNSUPPORTED_QUERY_FIELD, groupIndex=0, queryIndex=0, field=secret');
       expect(diagnostic).not.toContain('invoice-1');
       expect(diagnostic).not.toContain('must-not-appear');
     }
@@ -99,12 +130,22 @@ describe('QBO CDC response validation and isolated orchestration', () => {
     const runtime = new MemoryRuntime();
     runtime.checkpoints.set('Invoice', { checkpointAt: base, origin: 'historical' });
     const before = runtime.checkpoints.get('Invoice')?.checkpointAt.toISOString();
-    const api = makeApi(async () => response([group({ Invoice: [item('i-1')], totalCount: 1 })]));
+    const api = makeApi(async () => response([group({ Invoice: [item('i-1')], unsupportedField: 1 })]));
     await expect(new QboCdcIngestionService(api, runtime, () => Date.parse(boundary), async () => undefined).run(['Invoice'])).rejects.toThrow('QuickBooks CDC synchronization failed.');
     expect(runtime.failureMessages).toEqual([
-      'QuickBooks CDC failed during validate_response (reason=UNSUPPORTED_QUERY_FIELD, groupIndex=0, queryIndex=0, field=totalCount).',
+      'QuickBooks CDC failed during validate_response (reason=UNSUPPORTED_QUERY_FIELD, groupIndex=0, queryIndex=0, field=unsupportedField).',
     ]);
     expect(runtime.checkpoints.get('Invoice')?.checkpointAt.toISOString()).toBe(before);
+    expect(runtime.rows).toHaveLength(0);
+  });
+
+  it('does not advance checkpoint or persist raw rows when totalCount is invalid', async () => {
+    const runtime = new MemoryRuntime();
+    const before = runtime.checkpoints.get('Customer')?.checkpointAt.toISOString();
+    const api = makeApi(async () => response([group({ Customer: [item('c-1')], totalCount: -1 })]));
+    await expect(new QboCdcIngestionService(api, runtime, () => Date.parse(boundary), async () => undefined).run(['Customer'])).rejects.toThrow();
+    expect(runtime.failureMessages[0]).toContain('reason=INVALID_TOTAL_COUNT');
+    expect(runtime.checkpoints.get('Customer')?.checkpointAt.toISOString()).toBe(before);
     expect(runtime.rows).toHaveLength(0);
   });
 
@@ -187,7 +228,7 @@ describe('QBO CDC response validation and isolated orchestration', () => {
     const runtime = new MemoryRuntime();
     const before = runtime.checkpoints.get('Customer')?.checkpointAt.toISOString();
     const records = Array.from({ length: 1000 }, (_, index) => item('c-' + index));
-    const capped = makeApi(async () => response([group({ Customer: records })]));
+    const capped = makeApi(async () => response([group({ Customer: records, totalCount: 0 })]));
     await expect(new QboCdcIngestionService(capped, runtime, () => Date.parse(boundary), async () => undefined).run(['Customer'])).rejects.toThrow('QuickBooks CDC synchronization failed.');
     expect(runtime.checkpoints.get('Customer')?.checkpointAt.toISOString()).toBe(before);
     expect(runtime.rows).toHaveLength(0);
