@@ -1,6 +1,6 @@
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
-import { qboAuthService } from './auth.service';
+import { qboAuthService, type QboAuthService } from './auth.service';
 import { QBO_CDC_ENTITIES, type QboCdcEntity } from './types';
 
 export class QboApiError extends Error {
@@ -10,8 +10,10 @@ export class QboApiError extends Error {
 export class QboApiClient {
   private baseUrl = env.QBO_API_BASE_URL;
 
+  public constructor(private readonly auth: Pick<QboAuthService, 'getValidAccessToken' | 'refreshAccessToken'> = qboAuthService) {}
+
   public async get<T>(endpoint: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
-    const { accessToken } = await qboAuthService.getValidAccessToken();
+    const { accessToken } = await this.auth.getValidAccessToken();
     return this.getWithToken<T>(endpoint, params, accessToken);
   }
 
@@ -20,16 +22,15 @@ export class QboApiClient {
       throw new Error('QuickBooks CDC requires one or more supported entities.');
     }
     if (!Number.isFinite(Date.parse(changedSince))) throw new Error('QuickBooks CDC changedSince must be a valid timestamp.');
-    const { accessToken, realmId } = await qboAuthService.getValidAccessToken();
+    const { accessToken, realmId } = await this.auth.getValidAccessToken();
     return this.getWithToken<T>(
       '/v3/company/' + encodeURIComponent(realmId) + '/cdc',
       { entities: entities.join(','), changedSince },
       accessToken,
-      false,
     );
   }
 
-  private async getWithToken<T>(endpoint: string, params: Record<string, string | number | boolean>, accessToken: string, clearTokenOn401 = true): Promise<T> {
+  private async getWithToken<T>(endpoint: string, params: Record<string, string | number | boolean>, accessToken: string): Promise<T> {
     // Construct URL with query parameters
     const url = new URL(`${this.baseUrl}${endpoint}`);
     
@@ -40,21 +41,21 @@ export class QboApiClient {
     });
 
     try {
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Accept': 'application/json',
-        },
-      });
+      let response = await this.fetchWithToken(url, accessToken);
+
+      if (response.status === 401) {
+        await response.text();
+        try {
+          await this.auth.refreshAccessToken(accessToken);
+        } catch {
+          logger.warn('[QuickBooks] Access-token refresh after HTTP 401 failed; persisted credentials were retained.');
+          throw new QboApiError('QuickBooks authentication refresh failed.', 401);
+        }
+        const refreshed = await this.auth.getValidAccessToken();
+        response = await this.fetchWithToken(url, refreshed.accessToken);
+      }
 
       if (!response.ok) {
-        if (response.status === 401 && clearTokenOn401) {
-          logger.warn('[QuickBooks] Token unauthorized during API call. Clearing cache.');
-          // In a more robust system, we could auto-retry the refresh here once.
-          void qboAuthService.clearCache();
-        }
-
         await response.text();
         throw new QboApiError('QuickBooks API Error: [' + response.status + ']', response.status);
       }
@@ -65,6 +66,16 @@ export class QboApiClient {
       logger.error(`[QuickBooks] GET ${endpoint} failed`, { status: statusMatch?.[1] });
       throw error;
     }
+  }
+
+  private fetchWithToken(url: URL, accessToken: string): Promise<Response> {
+    return fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json',
+      },
+    });
   }
 }
 

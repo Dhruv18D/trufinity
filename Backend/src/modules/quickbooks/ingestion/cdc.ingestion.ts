@@ -27,6 +27,30 @@ export interface QboCdcCheckpointWrite {
   entity: QboCdcEntity; checkpointAt: Date; requestSince: Date; providerTime: Date; recordsProcessed: number; syncRunId: string;
 }
 
+export type QboCdcValidationReason =
+  | 'INVALID_ENVELOPE'
+  | 'INVALID_PROVIDER_TIME'
+  | 'INVALID_GROUP'
+  | 'INVALID_QUERY_RESPONSE'
+  | 'INVALID_START_POSITION'
+  | 'INVALID_MAX_RESULTS'
+  | 'UNEXPECTED_ENTITY'
+  | 'INVALID_ENTITY_ARRAY'
+  | 'MISSING_ID'
+  | 'INVALID_LAST_UPDATED_TIME'
+  | 'UNSUPPORTED_QUERY_FIELD'
+  | 'OBJECT_LIMIT_REACHED'
+  | 'PROVIDER_TIME_BEFORE_CHECKPOINT';
+
+export interface QboCdcValidationDetails {
+  groupIndex?: number;
+  queryIndex?: number;
+  field?: string;
+  entity?: QboCdcEntity;
+  sourceId?: string;
+  objectCount?: number;
+}
+
 export interface QboCdcRunRuntime {
   acquireLocks(entities: QboCdcEntity[]): Promise<(() => Promise<void>) | null>;
   recoverStaleRuns(): Promise<void>;
@@ -40,52 +64,88 @@ export interface QboCdcRunRuntime {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export class QboCdcResponseError extends Error {
-  public constructor(message: string, public readonly entity?: QboCdcEntity, public readonly sourceId?: string) {
+  public readonly entity: QboCdcEntity | undefined;
+  public readonly sourceId: string | undefined;
+
+  public constructor(
+    message: string,
+    public readonly reason: QboCdcValidationReason,
+    public readonly details: QboCdcValidationDetails = {},
+  ) {
     super(message);
     this.name = 'QboCdcResponseError';
+    this.entity = details.entity;
+    this.sourceId = details.sourceId;
   }
 }
 
 export class QboCdcLimitError extends Error {
+  public readonly reason = 'OBJECT_LIMIT_REACHED' as const;
   public constructor(public readonly objectCount: number) {
     super('QuickBooks CDC response reached the 1000-object safety limit; checkpoint was not advanced.');
     this.name = 'QboCdcLimitError';
   }
 }
 
+export class QboCdcProviderBoundaryError extends Error {
+  public readonly reason = 'PROVIDER_TIME_BEFORE_CHECKPOINT' as const;
+  public constructor() {
+    super('CDC provider boundary precedes the stored checkpoint.');
+    this.name = 'QboCdcProviderBoundaryError';
+  }
+}
+
+const safeDiagnosticValue = (value: string): string => {
+  const sanitized = value.replace(/[^A-Za-z0-9_.:-]/g, '_').slice(0, 64);
+  return sanitized || 'unknown';
+};
+
+export const formatQboCdcValidationDiagnostic = (error: unknown): string | null => {
+  if (error instanceof QboCdcLimitError) return `reason=${error.reason}, objectCount=${error.objectCount}`;
+  if (error instanceof QboCdcProviderBoundaryError) return `reason=${error.reason}, providerBeforeCheckpoint=true`;
+  if (!(error instanceof QboCdcResponseError)) return null;
+  const parts = [`reason=${error.reason}`];
+  if (error.details.entity) parts.push(`entity=${error.details.entity}`);
+  if (error.details.groupIndex !== undefined) parts.push(`groupIndex=${error.details.groupIndex}`);
+  if (error.details.queryIndex !== undefined) parts.push(`queryIndex=${error.details.queryIndex}`);
+  if (error.details.field) parts.push(`field=${safeDiagnosticValue(error.details.field)}`);
+  return parts.join(', ');
+};
+
 export const parseQboCdcResponse = (input: unknown, requestedEntities: QboCdcEntity[]): { providerTime: Date; events: QboCdcEvent[] } => {
-  if (!isRecord(input) || !Array.isArray(input.CDCResponse) || typeof input.time !== 'string') throw new QboCdcResponseError('Malformed QuickBooks CDC response envelope.');
+  if (!isRecord(input) || !Array.isArray(input.CDCResponse) || typeof input.time !== 'string') throw new QboCdcResponseError('Malformed QuickBooks CDC response envelope.', 'INVALID_ENVELOPE');
   const providerTime = new Date(input.time);
-  if (!Number.isFinite(providerTime.getTime())) throw new QboCdcResponseError('Malformed QuickBooks CDC provider time.');
+  if (!Number.isFinite(providerTime.getTime())) throw new QboCdcResponseError('Malformed QuickBooks CDC provider time.', 'INVALID_PROVIDER_TIME');
   const allowed = new Set<string>(requestedEntities);
   const events: QboCdcEvent[] = [];
-  for (const group of input.CDCResponse) {
-    if (!isRecord(group) || !Array.isArray(group.QueryResponse)) throw new QboCdcResponseError('Malformed QuickBooks CDC query group.');
-    for (const query of group.QueryResponse) {
-      if (!isRecord(query)) throw new QboCdcResponseError('Malformed QuickBooks CDC query response.');
+  for (const [groupIndex, group] of input.CDCResponse.entries()) {
+    if (!isRecord(group) || !Array.isArray(group.QueryResponse)) throw new QboCdcResponseError('Malformed QuickBooks CDC query group.', 'INVALID_GROUP', { groupIndex });
+    for (const [queryIndex, query] of group.QueryResponse.entries()) {
+      const position = { groupIndex, queryIndex };
+      if (!isRecord(query)) throw new QboCdcResponseError('Malformed QuickBooks CDC query response.', 'INVALID_QUERY_RESPONSE', position);
       if (query.startPosition !== undefined && (!Number.isInteger(query.startPosition) || Number(query.startPosition) < 1)) {
-        throw new QboCdcResponseError('Malformed CDC startPosition.');
+        throw new QboCdcResponseError('Malformed CDC startPosition.', 'INVALID_START_POSITION', { ...position, field: 'startPosition' });
       }
       if (query.maxResults !== undefined && (!Number.isInteger(query.maxResults) || Number(query.maxResults) < 0)) {
-        throw new QboCdcResponseError('Malformed CDC maxResults.');
+        throw new QboCdcResponseError('Malformed CDC maxResults.', 'INVALID_MAX_RESULTS', { ...position, field: 'maxResults' });
       }
       for (const entity of QBO_CDC_ENTITIES) {
         if (!(entity in query)) continue;
-        if (!allowed.has(entity)) throw new QboCdcResponseError('CDC returned an unrequested entity.');
+        if (!allowed.has(entity)) throw new QboCdcResponseError('CDC returned an unrequested entity.', 'UNEXPECTED_ENTITY', { ...position, entity });
         const records = query[entity];
-        if (!Array.isArray(records)) throw new QboCdcResponseError('Malformed CDC entity record list.', entity);
+        if (!Array.isArray(records)) throw new QboCdcResponseError('Malformed CDC entity record list.', 'INVALID_ENTITY_ARRAY', { ...position, entity });
         for (const raw of records) {
           if (!isRecord(raw) || typeof raw.Id !== 'string' || raw.Id.trim() === '') {
-            throw new QboCdcResponseError('CDC record is missing a valid Id.', entity, isRecord(raw) && typeof raw.Id === 'string' ? raw.Id : undefined);
+            throw new QboCdcResponseError('CDC record is missing a valid Id.', 'MISSING_ID', { ...position, entity });
           }
           const metadata = raw.MetaData;
           const lastUpdatedTime = isRecord(metadata) && typeof metadata.LastUpdatedTime === 'string' ? metadata.LastUpdatedTime : null;
-          if (!lastUpdatedTime || !Number.isFinite(Date.parse(lastUpdatedTime))) throw new QboCdcResponseError('CDC record is missing a valid MetaData.LastUpdatedTime.', entity, raw.Id);
+          if (!lastUpdatedTime || !Number.isFinite(Date.parse(lastUpdatedTime))) throw new QboCdcResponseError('CDC record is missing a valid MetaData.LastUpdatedTime.', 'INVALID_LAST_UPDATED_TIME', { ...position, entity, sourceId: raw.Id });
           events.push({ entity, sourceId: raw.Id, payload: raw, lastUpdatedTime, isDeleted: raw.status === 'Deleted' });
         }
       }
       for (const key of Object.keys(query)) {
-        if (!['Customer', 'Account', 'Invoice', 'Payment', 'startPosition', 'maxResults'].includes(key)) throw new QboCdcResponseError('CDC query response contains an unsupported field.');
+        if (!['Customer', 'Account', 'Invoice', 'Payment', 'startPosition', 'maxResults'].includes(key)) throw new QboCdcResponseError('CDC query response contains an unsupported field.', 'UNSUPPORTED_QUERY_FIELD', { ...position, field: key });
       }
     }
   }
@@ -232,7 +292,7 @@ export class QboCdcIngestionService {
       const parsed = parseQboCdcResponse(response, requested);
       processed = parsed.events.length;
       if (processed >= MAX_CDC_OBJECTS) throw new QboCdcLimitError(processed);
-      if (checkpointDates.some((date) => parsed.providerTime.getTime() < date.getTime())) throw new Error('CDC provider boundary precedes the stored checkpoint.');
+      if (checkpointDates.some((date) => parsed.providerTime.getTime() < date.getTime())) throw new QboCdcProviderBoundaryError();
       const ordered = [...parsed.events].sort((a, b) => a.entity.localeCompare(b.entity)
         || Date.parse(a.lastUpdatedTime) - Date.parse(b.lastUpdatedTime)
         || Number(a.isDeleted) - Number(b.isDeleted));
@@ -249,10 +309,21 @@ export class QboCdcIngestionService {
       }
       if (syncRunId) {
         const status = error instanceof QboApiError ? error.status : undefined;
-        const message = 'QuickBooks CDC failed during ' + stage + (status ? ' (HTTP ' + status + ')' : error instanceof QboCdcLimitError ? ' (1000-object safety limit).' : '.');
+        const diagnostic = formatQboCdcValidationDiagnostic(error);
+        const message = 'QuickBooks CDC failed during ' + stage + (diagnostic ? ' (' + diagnostic + ').' : status ? ' (HTTP ' + status + ').' : '.');
         try { await this.runtime.failRun(syncRunId, message, processed); }
         catch { logger.error('[QuickBooks CDC] Failed to update sync-run status.', { stage, syncRunId }); }
-        logger.error('[QuickBooks CDC] Synchronization failed.', { stage, syncRunId, httpStatus: status, capReached: error instanceof QboCdcLimitError });
+        const safeLog = [
+          '[QuickBooks CDC] Synchronization failed',
+          `stage=${stage}`,
+          `syncRunId=${syncRunId}`,
+          `requested=${requested.join(',')}`,
+          `errorClass=${error instanceof Error ? safeDiagnosticValue(error.name) : 'UnknownError'}`,
+          diagnostic,
+          status ? `httpStatus=${status}` : null,
+          `objectLimit=${error instanceof QboCdcLimitError}`,
+        ].filter((value): value is string => value !== null).join('; ');
+        logger.error(safeLog + '.');
       }
       throw new Error('QuickBooks CDC synchronization failed.', { cause: error });
     } finally {

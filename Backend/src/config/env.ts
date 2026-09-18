@@ -23,6 +23,7 @@ const envSchema = z.object({
   QBO_REVOKE_URL: z.string().default('https://developer.api.intuit.com/v2/oauth2/tokens/revoke'),
   QBO_DISCONNECT_AUTH_TOKEN: z.string().default(''),
   QBO_API_BASE_URL: z.string().default(''),
+  QBO_CDC_POLL_INTERVAL_MS: z.coerce.number().int().min(300_000).max(86_400_000).default(900_000),
 
   // ServiceTitan
   SERVICETITAN_CLIENT_ID: z.string().default(''),

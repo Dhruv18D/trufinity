@@ -1,14 +1,97 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
 import { db } from '../../database';
 import { randomBytes } from 'node:crypto';
+import type { Knex } from 'knex';
 
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
   expires_in: number;
   x_refresh_token_expires_in: number;
+}
+
+const parseTokenResponse = (value: unknown): TokenResponse => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Malformed QuickBooks OAuth token response.');
+  }
+  const candidate = value as Partial<TokenResponse>;
+  if (typeof candidate.access_token !== 'string' || candidate.access_token.trim() === ''
+    || typeof candidate.refresh_token !== 'string' || candidate.refresh_token.trim() === ''
+    || typeof candidate.expires_in !== 'number' || !Number.isFinite(candidate.expires_in) || candidate.expires_in <= 0
+    || typeof candidate.x_refresh_token_expires_in !== 'number' || !Number.isFinite(candidate.x_refresh_token_expires_in) || candidate.x_refresh_token_expires_in <= 0) {
+    throw new Error('Malformed QuickBooks OAuth token response.');
+  }
+  return candidate as TokenResponse;
+};
+
+export interface QboRefreshLock {
+  acquire(): Promise<() => Promise<void>>;
+}
+
+const REFRESH_LOCK_KEY = 'QuickBooks:OAuthTokenRefresh';
+const REFRESH_LOCK_MAX_ATTEMPTS = 100;
+const REFRESH_LOCK_RETRY_MS = 100;
+const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export class PostgresQboRefreshLock implements QboRefreshLock {
+  public constructor(
+    private readonly database: Knex = db,
+    private readonly maxAttempts = REFRESH_LOCK_MAX_ATTEMPTS,
+    private readonly retryMilliseconds = REFRESH_LOCK_RETRY_MS,
+  ) {}
+
+  public async acquire(): Promise<() => Promise<void>> {
+    const connection = await this.database.client.acquireConnection();
+    let acquired = false;
+    let connectionReleased = false;
+
+    try {
+      for (let attempt = 0; attempt < this.maxAttempts; attempt += 1) {
+        const result = await this.database.raw(
+          'SELECT pg_try_advisory_lock(hashtext(?)) AS locked',
+          [REFRESH_LOCK_KEY],
+        ).connection(connection);
+        acquired = Array.isArray(result.rows) && result.rows[0]?.locked === true;
+        if (acquired) break;
+        if (attempt < this.maxAttempts - 1) await delay(this.retryMilliseconds);
+      }
+
+      if (!acquired) {
+        await this.database.client.releaseConnection(connection);
+        connectionReleased = true;
+        throw new Error('QuickBooks OAuth refresh lock timed out.');
+      }
+    } catch (error) {
+      if (!connectionReleased) {
+        // A failed lock query can leave ownership uncertain; never return that
+        // session to the pool where an advisory lock could leak to another task.
+        await this.database.client.destroyRawConnection(connection).catch(() => undefined);
+      }
+      throw error;
+    }
+
+    let released = false;
+    return async (): Promise<void> => {
+      if (released) return;
+      try {
+        const result = await this.database.raw(
+          'SELECT pg_advisory_unlock(hashtext(?)) AS unlocked',
+          [REFRESH_LOCK_KEY],
+        ).connection(connection);
+        if (!Array.isArray(result.rows) || result.rows[0]?.unlocked !== true) {
+          throw new Error('PostgreSQL did not confirm QuickBooks OAuth refresh lock release.');
+        }
+        await this.database.client.releaseConnection(connection);
+        released = true;
+      } catch {
+        await this.database.client.destroyRawConnection(connection).catch(() => undefined);
+        released = true;
+        throw new Error('QuickBooks OAuth refresh lock could not be safely released.');
+      }
+    };
+  }
 }
 
 export interface QboTokenSet {
@@ -41,7 +124,10 @@ export class QboAuthService {
   private tokenSet: QboTokenSet | null = null;
   private readonly pendingStates = new Map<string, number>();
   private refreshInFlight: Promise<void> | null = null;
-  public constructor(private readonly tokenStore: QboTokenStore = new PostgresQboTokenStore()) {}
+  public constructor(
+    private readonly tokenStore: QboTokenStore = new PostgresQboTokenStore(),
+    private readonly refreshLock: QboRefreshLock = new PostgresQboRefreshLock(),
+  ) {}
   private EXPIRY_BUFFER_MS = 60 * 1000;
   private OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
@@ -117,14 +203,14 @@ export class QboAuthService {
       throw new Error(`Failed to exchange code: ${response.status}`);
     }
 
-    const data = (await response.json()) as TokenResponse;
+    const data = parseTokenResponse(await response.json());
     await this.saveTokenSet(data, realmId);
   }
 
-  public async refreshAccessToken(): Promise<void> {
+  public async refreshAccessToken(rejectedAccessToken?: string): Promise<void> {
     if (this.refreshInFlight) return this.refreshInFlight;
 
-    const refreshOperation = this.performAccessTokenRefresh();
+    const refreshOperation = this.performAccessTokenRefresh(rejectedAccessToken);
     this.refreshInFlight = refreshOperation;
     try {
       await refreshOperation;
@@ -133,35 +219,45 @@ export class QboAuthService {
     }
   }
 
-  private async performAccessTokenRefresh(): Promise<void> {
-    if (!this.tokenSet?.refreshToken) {
-      throw new Error('No refresh token available. User must re-authorize.');
+  private async performAccessTokenRefresh(rejectedAccessToken?: string): Promise<void> {
+    const release = await this.refreshLock.acquire();
+    try {
+      // Another process may have refreshed and rotated credentials while this
+      // process waited. Always use the latest durable token state under the lock.
+      const stored = await this.tokenStore.load();
+      if (!stored) throw new Error('No stored QuickBooks refresh token is available.');
+
+      const tokenWasRotatedByAnotherProcess = rejectedAccessToken !== undefined
+        && stored.accessToken !== rejectedAccessToken;
+      if (stored.accessTokenExpiry > Date.now() + this.EXPIRY_BUFFER_MS
+        && (rejectedAccessToken === undefined || tokenWasRotatedByAnotherProcess)) {
+        this.tokenSet = stored;
+        return;
+      }
+
+      logger.info('[QuickBooks] Refreshing access token');
+      const authHeader = Buffer.from(`${env.QBO_CLIENT_ID}:${env.QBO_CLIENT_SECRET}`).toString('base64');
+      const response = await fetch(env.QBO_TOKEN_URL, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${authHeader}`,
+        },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: stored.refreshToken }),
+      });
+
+      if (!response.ok) {
+        await response.text();
+        logger.error('[QuickBooks] Token refresh failed', { status: response.status });
+        throw new Error(`Failed to refresh token: ${response.status}`);
+      }
+
+      const data = parseTokenResponse(await response.json());
+      await this.saveTokenSet(data, stored.realmId);
+    } finally {
+      await release();
     }
-
-    logger.info('[QuickBooks] Refreshing access token');
-    const authHeader = Buffer.from(`${env.QBO_CLIENT_ID}:${env.QBO_CLIENT_SECRET}`).toString('base64');
-    
-    const response = await fetch(env.QBO_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': `Basic ${authHeader}`
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: this.tokenSet.refreshToken
-      })
-    });
-
-    if (!response.ok) {
-      await response.text();
-      logger.error('[QuickBooks] Token refresh failed', { status: response.status });
-      throw new Error(`Failed to refresh token: ${response.status}`);
-    }
-
-    const data = (await response.json()) as TokenResponse;
-    await this.saveTokenSet(data, this.tokenSet.realmId);
   }
 
   public async getValidAccessToken(): Promise<{ accessToken: string, realmId: string }> {
@@ -203,9 +299,8 @@ export class QboAuthService {
     logger.info('[QuickBooks] Token state saved securely');
   }
 
-  public async clearCache(): Promise<void> {
+  public clearCache(): void {
     this.tokenSet = null;
-    await this.tokenStore.clear();
   }
 
   private removeExpiredStates(): void {
