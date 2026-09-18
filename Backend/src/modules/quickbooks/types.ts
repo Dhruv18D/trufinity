@@ -21,6 +21,7 @@ export interface QboCdcQueryResponse {
   Payment?: unknown[];
   startPosition?: number;
   maxResults?: number;
+  totalCount?: number;
 }
 
 export interface QboCdcGroup {
