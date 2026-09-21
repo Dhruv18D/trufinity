@@ -29,7 +29,7 @@ describe('Lace scheduler', () => {
 
     startLaceScheduler();
 
-    expect(scheduledTasks).toEqual([env.LACE_CALL_ANALYSIS_CRON, env.LACE_AGENT_PERFORMANCE_CRON]);
+    expect(scheduledTasks).toEqual([env.LACE_CALL_ANALYSIS_CRON, env.LACE_AGENT_PERFORMANCE_CRON, env.LACE_STUCK_RUN_REAPER_CRON]);
   });
 
   it('running a scheduled tick calls the ingestion service', async () => {

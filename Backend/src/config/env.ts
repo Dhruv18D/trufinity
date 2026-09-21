@@ -44,6 +44,10 @@ const envSchema = z.object({
   // daily at 02:00, Agent Performance monthly on the 1st at 03:00 (server time).
   LACE_CALL_ANALYSIS_CRON: z.string().default('0 2 * * *'),
   LACE_AGENT_PERFORMANCE_CRON: z.string().default('0 3 1 * *'),
+  // Stuck-run reaper: catches a sync_run left RUNNING by a crashed process
+  // well before the next scheduled ingestion would notice on its own.
+  LACE_STUCK_RUN_REAPER_CRON: z.string().default('*/30 * * * *'),
+  LACE_STUCK_RUN_THRESHOLD_MINUTES: z.coerce.number().default(60),
 
   // Detect layer thresholds (SPEC-BI-001 exact values not confirmed yet -
   // these are reasonable defaults, deliberately env-tunable so they can be
@@ -55,6 +59,11 @@ const envSchema = z.object({
   // this many times its trailing 4-week weekly average (min sample size below).
   DETECT_D06_OBJECTION_SPIKE_MULTIPLIER: z.coerce.number().default(2),
   DETECT_D06_OBJECTION_MIN_SAMPLE: z.coerce.number().default(3),
+
+  // Narrate layer: LLM writes prose describing detected_alerts findings only -
+  // it never recomputes numbers (SPEC-BI-001 Section 4.1).
+  ANTHROPIC_API_KEY: z.string().default(''),
+  NARRATE_MODEL: z.string().default('claude-opus-5'),
 });
 
 const _env = envSchema.safeParse(process.env);

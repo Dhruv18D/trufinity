@@ -37,7 +37,7 @@ export class DetectService {
       evaluateObjectionCategorySpikes(window, this.database),
     ]);
 
-    const findings = [...(d01 ? [d01] : []), ...d06];
+    const findings = [...d01, ...d06];
     for (const finding of findings) {
       await persistFinding(this.database, finding);
     }

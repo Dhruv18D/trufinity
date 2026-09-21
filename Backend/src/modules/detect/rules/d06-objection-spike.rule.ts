@@ -3,16 +3,30 @@ import { db } from '../../../database';
 import { env } from '../../../config/env';
 import type { DetectedAlertFinding, DetectionWindow } from '../detect.types';
 
-const BASELINE_WEEKS = 4;
-
 interface CategoryCount {
   category: string;
   count: number;
 }
 
-async function objectionCountsForWindow(database: Knex, start: Date, end: Date): Promise<Map<string, number>> {
+// Per SPEC-BI-001 Section 5.3: "objection category rising above baseline
+// SHARE of unbooked calls" - the metric is a category's share of unbooked
+// calls (occurrences / total unbooked calls), not a raw occurrence count.
+async function objectionShareForWindow(
+  database: Knex,
+  start: Date,
+  end: Date,
+): Promise<{ shares: Map<string, number>; counts: Map<string, number>; totalUnbooked: number }> {
+  const totalRow = await database('canonical_lace_calls')
+    .where({ booked: false })
+    .andWhere('received_at', '>=', start)
+    .andWhere('received_at', '<', end)
+    .count('* as total')
+    .first<{ total: string }>();
+  const totalUnbooked = Number(totalRow?.total ?? 0);
+
   const rows: CategoryCount[] = await database('canonical_lace_calls')
     .crossJoin(database.raw('unnest(canonical_lace_calls.objections) as category'))
+    .where({ booked: false })
     .whereNotNull('objections')
     .andWhere('received_at', '>=', start)
     .andWhere('received_at', '<', end)
@@ -21,34 +35,38 @@ async function objectionCountsForWindow(database: Knex, start: Date, end: Date):
     .count('* as count')
     .then((result) => result as unknown as { category: string; count: string }[])
     .then((result) => result.map((r) => ({ category: r.category, count: Number(r.count) })));
-  return new Map(rows.map((r) => [r.category, r.count]));
+
+  const counts = new Map(rows.map((r) => [r.category, r.count]));
+  const shares = new Map(rows.map((r) => [r.category, totalUnbooked > 0 ? r.count / totalUnbooked : 0]));
+  return { shares, counts, totalUnbooked };
 }
 
-// D-06: flags an objection category whose current-week count spikes against
-// its trailing 4-week weekly average (SPEC-BI-001 Section 2.2/4.1 category;
-// exact threshold TBD from the spec - see DETECT_D06_OBJECTION_SPIKE_MULTIPLIER).
-// A minimum sample size avoids flagging noise on rarely-occurring categories
-// (e.g. going from 1 occurrence to 2 is a 100% "spike" but not meaningful).
+// D-06: flags an objection category whose current-week share of unbooked
+// calls rises above its trailing 4-week baseline share (SPEC-BI-001 Section
+// 5.3: "Any Lace objection category rising above baseline share of unbooked
+// calls"; exact threshold TBD from the spec - see DETECT_D06_OBJECTION_SPIKE_MULTIPLIER).
+// A minimum occurrence count avoids flagging noise on rarely-occurring
+// categories (e.g. 1 of 2 unbooked calls is a 100% share but not meaningful).
 export async function evaluateObjectionCategorySpikes(
   window: DetectionWindow,
   database: Knex = db,
 ): Promise<DetectedAlertFinding[]> {
   const [current, baseline] = await Promise.all([
-    objectionCountsForWindow(database, window.periodStart, window.periodEnd),
-    objectionCountsForWindow(database, window.baselineStart, window.baselineEnd),
+    objectionShareForWindow(database, window.periodStart, window.periodEnd),
+    objectionShareForWindow(database, window.baselineStart, window.baselineEnd),
   ]);
 
   const findings: DetectedAlertFinding[] = [];
-  for (const [category, currentCount] of current) {
+  for (const [category, currentShare] of current.shares) {
+    const currentCount = current.counts.get(category) ?? 0;
     if (currentCount < env.DETECT_D06_OBJECTION_MIN_SAMPLE) continue;
 
-    const baselineTotal = baseline.get(category) ?? 0;
-    const baselineWeeklyAverage = baselineTotal / BASELINE_WEEKS;
+    const baselineShare = baseline.shares.get(category) ?? 0;
     // No baseline occurrences at all is a new category appearing, not a
-    // measurable "spike" against a rate - skip rather than divide by zero.
-    if (baselineWeeklyAverage === 0) continue;
+    // measurable share spike - skip rather than divide by zero.
+    if (baselineShare === 0) continue;
 
-    const multiplier = currentCount / baselineWeeklyAverage;
+    const multiplier = currentShare / baselineShare;
     if (multiplier < env.DETECT_D06_OBJECTION_SPIKE_MULTIPLIER) continue;
 
     findings.push({
@@ -58,12 +76,13 @@ export async function evaluateObjectionCategorySpikes(
       periodEnd: window.periodEnd,
       baselineStart: window.baselineStart,
       baselineEnd: window.baselineEnd,
-      metricValue: currentCount,
-      baselineValue: baselineWeeklyAverage,
+      metricValue: currentShare,
+      baselineValue: baselineShare,
       details: {
         currentCount,
-        baselineTotalOverWindow: baselineTotal,
-        baselineWeeks: BASELINE_WEEKS,
+        currentTotalUnbooked: current.totalUnbooked,
+        baselineCount: baseline.counts.get(category) ?? 0,
+        baselineTotalUnbooked: baseline.totalUnbooked,
         multiplier,
         thresholdMultiplier: env.DETECT_D06_OBJECTION_SPIKE_MULTIPLIER,
       },

@@ -26,12 +26,14 @@ describe('DetectService', () => {
   });
 
   it('persists findings from both rules and returns them', async () => {
+    // Baseline: booking rate 8/10 = 80%, 'Value Concerns' share of unbooked = 2/4 = 50%.
+    // Current: booking rate 2/8 = 25% (a 55-point drop -> D-01), share of unbooked = 6/6 = 100% (2x baseline -> D-06).
     await db('canonical_lace_calls').insert([
       ...Array.from({ length: 8 }, () => callRow(BASELINE_DAY, true)),
       ...Array.from({ length: 2 }, () => callRow(BASELINE_DAY, false)),
-      ...Array.from({ length: 2 }, () => callRow(CURRENT_DAY, true, ['Value Concerns'])),
+      ...Array.from({ length: 2 }, () => callRow(BASELINE_DAY, false, ['Value Concerns'])),
+      ...Array.from({ length: 2 }, () => callRow(CURRENT_DAY, true)),
       ...Array.from({ length: 6 }, () => callRow(CURRENT_DAY, false, ['Value Concerns'])),
-      ...Array.from({ length: 4 }, () => callRow(BASELINE_DAY, true, ['Value Concerns'])),
     ]);
 
     const result = await new DetectService().run(NOW);

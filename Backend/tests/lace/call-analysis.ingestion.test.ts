@@ -55,8 +55,11 @@ class FakeRepository implements CallAnalysisRawRepository {
     this.errors.push(...errors);
     this.ingestedFileKeys.add(`${exportType}:${file.key}:${file.eTag}`);
   }
-  public async completeSyncRun(): Promise<void> {
-    this.runStatus = 'COMPLETED';
+  public async recordFileFailure(): Promise<void> {
+    // no-op for these tests
+  }
+  public async completeSyncRun(_syncRunId: string, _recordsProcessed: number, status: 'COMPLETED' | 'COMPLETED_WITH_ERRORS' = 'COMPLETED'): Promise<void> {
+    this.runStatus = status;
   }
   public async failSyncRun(): Promise<void> {
     this.runStatus = 'FAILED';

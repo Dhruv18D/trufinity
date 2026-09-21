@@ -8,6 +8,8 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
 import { laceRouter } from './modules/lace/lace.routes';
 import { detectRouter } from './modules/detect/detect.routes';
+import { narrateRouter } from './modules/narrate/narrate.routes';
+import { deliverRouter } from './modules/deliver/deliver.routes';
 
 const app = express();
 
@@ -34,6 +36,8 @@ app.use('/api/integrations/servicetitan', serviceTitanRouter);
 app.use('/api/integrations/quickbooks', quickbooksRouter);
 app.use('/api/integrations/lace', laceRouter);
 app.use('/api/detect', detectRouter);
+app.use('/api/narrate', narrateRouter);
+app.use('/api/brief', deliverRouter);
 
 // Handle 404
 app.use(notFoundHandler);

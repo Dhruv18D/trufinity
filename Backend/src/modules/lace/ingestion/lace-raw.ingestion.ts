@@ -36,8 +36,25 @@ export interface LaceIngestionRepository {
     records: LaceRawRecord[],
     errors: InvalidLaceRecord[],
   ): Promise<void>;
-  completeSyncRun(syncRunId: string, recordsProcessed: number): Promise<void>;
+  recordFileFailure(syncRunId: string, exportType: string, fileKey: string, message: string): Promise<void>;
+  completeSyncRun(syncRunId: string, recordsProcessed: number, status: 'COMPLETED' | 'COMPLETED_WITH_ERRORS'): Promise<void>;
   failSyncRun(syncRunId: string, safeMessage: string): Promise<void>;
+}
+
+// Transient S3/network failures (throttling, connection resets, timeouts) are
+// common in production and should not sink an entire day's ingestion over one
+// bad request. Fixed small attempt count with exponential backoff.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 300): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, baseDelayMs * 2 ** (attempt - 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 export class LaceSyncInProgressError extends Error {
@@ -138,8 +155,17 @@ export class PostgresLaceRawRepository implements LaceIngestionRepository {
     });
   }
 
-  public async completeSyncRun(syncRunId: string, recordsProcessed: number): Promise<void> {
-    await this.database('sync_runs').where({ id: syncRunId }).update({ status: 'COMPLETED', records_processed: recordsProcessed, completed_at: this.database.fn.now() });
+  public async recordFileFailure(syncRunId: string, exportType: string, fileKey: string, message: string): Promise<void> {
+    await this.database('sync_errors').insert({
+      sync_run_id: syncRunId,
+      source_id: null,
+      error_message: message,
+      payload: { exportType, fileKey },
+    });
+  }
+
+  public async completeSyncRun(syncRunId: string, recordsProcessed: number, status: 'COMPLETED' | 'COMPLETED_WITH_ERRORS'): Promise<void> {
+    await this.database('sync_runs').where({ id: syncRunId }).update({ status, records_processed: recordsProcessed, completed_at: this.database.fn.now() });
   }
 
   public async failSyncRun(syncRunId: string, safeMessage: string): Promise<void> {
@@ -154,40 +180,65 @@ export class LaceFileIngestionService {
     private readonly repository: LaceIngestionRepository,
   ) {}
 
-  public async run(): Promise<{ syncRunId: string; recordsProcessed: number; filesProcessed: number }> {
+  public async run(): Promise<{ syncRunId: string; recordsProcessed: number; filesProcessed: number; filesFailed: number }> {
     return this.repository.withExclusiveLock((lockedRepository) => this.runLocked(lockedRepository));
   }
 
-  private async runLocked(repository: LaceIngestionRepository): Promise<{ syncRunId: string; recordsProcessed: number; filesProcessed: number }> {
+  private async runLocked(
+    repository: LaceIngestionRepository,
+  ): Promise<{ syncRunId: string; recordsProcessed: number; filesProcessed: number; filesFailed: number }> {
     await repository.recoverInterruptedRuns();
     let syncRunId: string | null = null;
     let processed = 0;
     let filesProcessed = 0;
+    let filesFailed = 0;
     try {
       syncRunId = await repository.createSyncRun();
-      const objects = await this.objectStore.listObjects(this.config.s3Prefix);
+      const objects = await withRetry(() => this.objectStore.listObjects(this.config.s3Prefix));
+
+      // One bad file must not block the rest of the batch - each file is
+      // isolated so a single malformed or transiently-unreachable export
+      // doesn't leave every file after it un-ingested until the next
+      // scheduled run (which, for a daily cron, could be 24h away).
       for (const file of objects) {
         if (!file.key.toLowerCase().endsWith('.csv')) continue;
 
-        const alreadyIngested = await repository.isFileIngested(this.config.exportType, file.key, file.eTag);
-        if (alreadyIngested) continue;
+        try {
+          const alreadyIngested = await repository.isFileIngested(this.config.exportType, file.key, file.eTag);
+          if (alreadyIngested) continue;
 
-        const text = await this.objectStore.getObjectText(file.key);
-        const rows = parseLaceCsv(text);
-        const records: LaceRawRecord[] = [];
-        const errors: InvalidLaceRecord[] = [];
-        for (const row of rows) {
-          const sourceId = this.config.extractSourceId(row);
-          if (sourceId === null) errors.push({ sourceId, message: `${this.config.exportType} row is missing a valid natural key.`, payload: row });
-          else records.push({ sourceId, payload: row });
+          const text = await withRetry(() => this.objectStore.getObjectText(file.key));
+          const rows = parseLaceCsv(text);
+          const records: LaceRawRecord[] = [];
+          const errors: InvalidLaceRecord[] = [];
+          for (const row of rows) {
+            const sourceId = this.config.extractSourceId(row);
+            if (sourceId === null) errors.push({ sourceId, message: `${this.config.exportType} row is missing a valid natural key.`, payload: row });
+            else records.push({ sourceId, payload: row });
+          }
+
+          await repository.commitFile(syncRunId, file, this.config.exportType, records, errors);
+          processed += records.length;
+          filesProcessed += 1;
+        } catch (fileError) {
+          filesFailed += 1;
+          const fileMessage = fileError instanceof Error ? fileError.message : String(fileError);
+          logger.error(`[LaceAI] ${this.config.exportType} file failed, continuing with remaining files`, {
+            syncRunId,
+            fileKey: file.key,
+            error: fileMessage,
+          });
+          await repository.recordFileFailure(syncRunId, this.config.exportType, file.key, fileMessage);
         }
-
-        await repository.commitFile(syncRunId, file, this.config.exportType, records, errors);
-        processed += records.length;
-        filesProcessed += 1;
       }
-      await repository.completeSyncRun(syncRunId, processed);
-      return { syncRunId, recordsProcessed: processed, filesProcessed };
+
+      if (filesFailed > 0 && filesProcessed === 0) {
+        // Nothing succeeded this run - treat as a hard failure, not a quiet no-op.
+        throw new Error(`All ${filesFailed} file(s) failed for Lace AI ${this.config.exportType} ingestion.`);
+      }
+
+      await repository.completeSyncRun(syncRunId, processed, filesFailed > 0 ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED');
+      return { syncRunId, recordsProcessed: processed, filesProcessed, filesFailed };
     } catch (error) {
       const message = `Lace AI ${this.config.exportType} export ingestion failed.`;
       if (syncRunId !== null) await repository.failSyncRun(syncRunId, message);
