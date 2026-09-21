@@ -152,9 +152,15 @@ export class PostgresServiceTitanQboCustomerIdentityRepository implements Custom
     sourceSystem: 'ServiceTitan' | 'QuickBooks',
   ): Promise<IdentityRawCustomerRecord[]> {
     const table = sourceSystem === 'ServiceTitan' ? 'raw_st_customers' : 'raw_qbo_customers';
-    return await this.database(table)
-      .select('source_id as sourceId', 'payload', 'is_deleted as isDeleted')
-      .where({ is_latest: true }) as IdentityRawCustomerRecord[];
+    const query = this.database(table)
+      .select('source_id as sourceId', 'payload')
+      .where({ is_latest: true });
+    if (sourceSystem === 'QuickBooks') {
+      query.select('is_deleted as isDeleted');
+    } else {
+      query.select(this.database.raw('false AS "isDeleted"'));
+    }
+    return await query as IdentityRawCustomerRecord[];
   }
 
   public async persist(
