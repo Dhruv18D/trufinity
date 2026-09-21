@@ -14,6 +14,7 @@ import {
 
 const RUN_SOURCE = 'ServiceTitanQuickBooks';
 const RUN_ENTITY = 'CustomerIdentity';
+export const IDENTITY_PERSIST_BATCH_SIZE = 500;
 const LOCK_KEYS = [
   'QuickBooks:Customer',
   'QuickBooks:Customers',
@@ -60,6 +61,16 @@ const safeIssue = (sourceId: string, reason: CustomerIdentityIssue['reason']): C
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+export const runInBatches = async <T>(
+  rows: T[],
+  insertBatch: (batch: T[]) => Promise<void>,
+  batchSize = IDENTITY_PERSIST_BATCH_SIZE,
+): Promise<void> => {
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    await insertBatch(rows.slice(offset, offset + batchSize));
+  }
+};
 
 const parseSourceData = (value: unknown): Record<string, unknown> | null => {
   if (value === null || value === undefined) return null;
@@ -375,8 +386,12 @@ export class PostgresServiceTitanQboCustomerIdentityRepository implements Custom
           });
         }
       }
-      if (insertRows.length > 0) await trx('identity_mappings').insert(insertRows);
-      if (issues.length > 0) await this.insertIssues(trx, runId, issues);
+      await runInBatches(insertRows, async (batch) => {
+        await trx('identity_mappings').insert(batch);
+      });
+      await runInBatches(issues, async (batch) => {
+        await this.insertIssues(trx, runId, batch);
+      });
 
       const appliedPlans = resolved.filter((item) => !skippedByConflict.has(item.plan.sourceId));
 

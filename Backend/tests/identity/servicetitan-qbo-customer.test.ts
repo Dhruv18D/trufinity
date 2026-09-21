@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { analyzeCustomerIdentity, normalizeIdentityValue } from '../../src/modules/identity/servicetitan-customer.mapper';
 import { ServiceTitanQboCustomerIdentityService } from '../../src/modules/identity/servicetitan-qbo-customer.service';
+import { runInBatches } from '../../src/modules/identity/servicetitan-qbo-customer.repository';
 import {
   type CustomerIdentityAnalysis,
   type CustomerIdentityRepository,
@@ -131,6 +132,22 @@ class MemoryRepository implements CustomerIdentityRepository {
 }
 
 describe('ServiceTitan/QBO customer identity analysis', () => {
+  it('persists rows in multiple safe batches and stops on a failed batch', async () => {
+    const rows = Array.from({ length: 1001 }, (_, index) => index);
+    const batches: number[][] = [];
+    await runInBatches(rows, async (batch) => {
+      batches.push(batch);
+    });
+    expect(batches.map((batch) => batch.length)).toEqual([500, 500, 1]);
+
+    const attempted: number[][] = [];
+    await expect(runInBatches(rows, async (batch) => {
+      attempted.push(batch);
+      if (attempted.length === 2) throw new Error('batch failure');
+    })).rejects.toThrow('batch failure');
+    expect(attempted.map((batch) => batch.length)).toEqual([500, 500]);
+  });
+
   it('performs exact Tier-A matching and preserves the approved normalization rule', () => {
     expect(normalizeIdentityValue('  ACME Plumbing, Inc. ')).toBe('acmeplumbinginc');
     const result = analyzeCustomerIdentity([st('1')], [qbo('q1')]);
