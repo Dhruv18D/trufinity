@@ -15,6 +15,7 @@ export const validateQboCdcPollInterval = (value: number): number => {
 export interface QboCdcSchedulerLogger { info(message: string): unknown; warn(message: string): unknown; error(message: string): unknown; }
 export interface QboCdcSchedulerOptions {
   runEntity(entity: QboCdcEntity): Promise<unknown>;
+  afterSuccessfulCycle?: (() => Promise<void>) | undefined;
   logger: QboCdcSchedulerLogger;
   intervalMs: number;
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
@@ -93,6 +94,13 @@ export class QboCdcScheduler {
     }
     const summary = { attempted, succeeded, failed, durationMs: Math.max(0, Math.round(this.now() - startedAt)) };
     this.options.logger.warn(`QuickBooks CDC cycle complete; attempted=${attempted.length}; succeeded=${succeeded.length}; failed=${failed.length}; durationMs=${summary.durationMs}.`);
+    if (failed.length === 0 && this.options.afterSuccessfulCycle) {
+      try {
+        await this.options.afterSuccessfulCycle();
+      } catch {
+        this.options.logger.error('QuickBooks CDC post-cycle propagation failed; CDC results remain committed.');
+      }
+    }
     return summary;
   }
 }
