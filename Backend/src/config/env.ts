@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 import path from 'path';
+import { sanitizeApprovedMailboxAllowlist } from '../modules/google/gmail-policy';
 
 // Load environment variables from .env file
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -24,6 +25,22 @@ const envSchema = z.object({
   QBO_DISCONNECT_AUTH_TOKEN: z.string().default(''),
   QBO_API_BASE_URL: z.string().default(''),
   QBO_CDC_POLL_INTERVAL_MS: z.coerce.number().int().min(300_000).max(86_400_000).default(900_000),
+
+  // Google Workspace / Gmail foundation. Credentials are optional until Phase B.
+  GOOGLE_CLOUD_PROJECT_ID: z.string().default('trufinity-email-integration'),
+  GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().default(''),
+  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().default('').transform((value) => value.replace(/\\n/g, '\n')),
+  GOOGLE_ADMIN_DELEGATED_USER: z.string().default(''),
+  GOOGLE_GMAIL_DELEGATED_USER: z.string().default(''),
+  GOOGLE_GMAIL_HISTORICAL_DAYS: z.coerce.number().int().min(1).max(3650).default(365),
+  GOOGLE_GMAIL_SYNC_INTERVAL_MS: z.coerce.number().int().min(300_000).max(86_400_000).default(900_000),
+  GOOGLE_GMAIL_APPROVED_CONTENT_MAILBOXES: z.string()
+    .default('service@trufinity.ca,support@trufinity.ca,billing@trufinity.ca')
+    .superRefine((value, context) => {
+      try { sanitizeApprovedMailboxAllowlist(value); }
+      catch { context.addIssue({ code: 'custom', message: 'Google Gmail approved content mailbox configuration is invalid.' }); }
+    })
+    .transform(sanitizeApprovedMailboxAllowlist),
 
   // ServiceTitan
   SERVICETITAN_CLIENT_ID: z.string().default(''),
