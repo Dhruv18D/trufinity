@@ -1,0 +1,170 @@
+import type { Knex } from 'knex';
+import { db } from '../../database';
+import type { GmailMailboxConfig } from './types';
+
+export interface GmailHistoricalMailbox {
+  id: string;
+  mailboxAddress: string;
+  normalizedMailboxAddress: string;
+  contentMode: 'METADATA' | 'CONTENT';
+}
+
+export interface GmailHistoricalMessageWrite {
+  providerMessageId: string;
+  threadId: string;
+  payload: Record<string, unknown>;
+  contentMode: 'METADATA' | 'CONTENT';
+  internalDate: Date;
+  providerHistoryId: string | null;
+}
+
+export interface GmailHistoricalError {
+  sourceId: string | null;
+  message: string;
+}
+
+export interface GmailHistoricalRepository {
+  withMailboxLock<T>(mailboxAddress: string, work: () => Promise<T>): Promise<T>;
+  recoverInterruptedRun(entityType: string): Promise<void>;
+  ensureMailbox(mailbox: GmailMailboxConfig): Promise<GmailHistoricalMailbox>;
+  createSyncRun(entityType: string): Promise<string>;
+  commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number>;
+  completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number): Promise<void>;
+  failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void>;
+}
+
+const SOURCE_SYSTEM = 'GoogleWorkspace';
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (typeof value === 'object' && value !== null) {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+
+export class KnexGmailHistoricalRepository implements GmailHistoricalRepository {
+  public constructor(private readonly database: Knex = db) {}
+
+  public async withMailboxLock<T>(mailboxAddress: string, work: () => Promise<T>): Promise<T> {
+    const connection = await this.database.client.acquireConnection();
+    const lockKey = `GoogleWorkspace:GmailHistorical:${mailboxAddress}`;
+    let acquired = false;
+    let destroyConnection = false;
+    try {
+      const result = await this.database.raw('SELECT pg_try_advisory_lock(hashtext(?)) AS locked', [lockKey]).connection(connection);
+      acquired = Array.isArray(result.rows) && result.rows[0]?.locked === true;
+      if (!acquired) throw new Error('Google Workspace Gmail historical synchronization is already running for this mailbox.');
+      return await work();
+    } finally {
+      try {
+        if (acquired) await this.database.raw('SELECT pg_advisory_unlock(hashtext(?))', [lockKey]).connection(connection);
+      } catch {
+        destroyConnection = true;
+      } finally {
+        if (destroyConnection) await this.database.client.destroyRawConnection(connection).catch(() => undefined);
+        await this.database.client.releaseConnection(connection);
+      }
+    }
+  }
+
+  public async recoverInterruptedRun(entityType: string): Promise<void> {
+    await this.database('sync_runs').where({ source_system: SOURCE_SYSTEM, entity_type: entityType, status: 'RUNNING' }).update({
+      status: 'FAILED',
+      error_message: 'Recovered interrupted Google Workspace Gmail historical sync run.',
+      completed_at: this.database.fn.now(),
+    });
+  }
+
+  public async ensureMailbox(mailbox: GmailMailboxConfig): Promise<GmailHistoricalMailbox> {
+    const fields = {
+      mailbox_address: mailbox.normalizedAddress,
+      normalized_mailbox_address: mailbox.normalizedAddress,
+      enabled: true,
+      content_mode: mailbox.contentMode,
+      updated_at: this.database.fn.now(),
+    };
+    const rows = await this.database('google_gmail_mailboxes').insert(fields)
+      .onConflict('normalized_mailbox_address')
+      .merge(fields)
+      .returning(['id', 'mailbox_address', 'normalized_mailbox_address', 'content_mode']);
+    const row = rows[0] as { id?: unknown; mailbox_address?: unknown; normalized_mailbox_address?: unknown; content_mode?: unknown } | undefined;
+    if (!row || typeof row.id !== 'string' || typeof row.mailbox_address !== 'string' || typeof row.normalized_mailbox_address !== 'string'
+      || (row.content_mode !== 'METADATA' && row.content_mode !== 'CONTENT')) throw new Error('Unable to register Google Workspace mailbox.');
+    return { id: row.id, mailboxAddress: row.mailbox_address, normalizedMailboxAddress: row.normalized_mailbox_address, contentMode: row.content_mode };
+  }
+
+  public async createSyncRun(entityType: string): Promise<string> {
+    const rows = await this.database('sync_runs').insert({ source_system: SOURCE_SYSTEM, entity_type: entityType, status: 'RUNNING' }).returning('id');
+    const id = (rows[0] as { id?: unknown } | undefined)?.id;
+    if (typeof id !== 'string') throw new Error('Unable to create Google Workspace Gmail sync run.');
+    return id;
+  }
+
+  public async commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number> {
+    let persisted = 0;
+    await this.database.transaction(async (trx) => {
+      for (const message of messages) {
+        const current = await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).first('payload');
+        if (current && stableJson(current.payload) === stableJson(message.payload)) continue;
+        await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).update({ is_latest: false });
+        await trx('raw_gmail_messages').insert({
+          mailbox_id: mailbox.id,
+          mailbox_address: mailbox.normalizedMailboxAddress,
+          provider_message_id: message.providerMessageId,
+          thread_id: message.threadId,
+          payload: message.payload,
+          content_mode: message.contentMode,
+          internal_date: message.internalDate,
+          provider_history_id: message.providerHistoryId,
+          is_deleted: false,
+          is_latest: true,
+          sync_run_id: syncRunId,
+        });
+        persisted += 1;
+      }
+      if (errors.length > 0) {
+        await trx('sync_errors').insert(errors.map((error) => ({
+          sync_run_id: syncRunId,
+          source_id: error.sourceId,
+          error_message: error.message,
+          payload: null,
+        })));
+      }
+    });
+    return persisted;
+  }
+
+  public async completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number): Promise<void> {
+    await this.database.transaction(async (trx) => {
+      const state = {
+        sync_type: 'HISTORICAL',
+        historical_window_days: historicalWindowDays,
+        included_labels: ['INBOX', 'SENT'],
+      };
+      await trx('raw_gmail_sync_metadata').insert({
+        mailbox_id: mailbox.id,
+        historical_page_token: null,
+        state,
+        last_successful_sync_at: trx.fn.now(),
+        updated_at: trx.fn.now(),
+      }).onConflict('mailbox_id').merge({
+        historical_page_token: null,
+        state,
+        last_successful_sync_at: trx.fn.now(),
+        updated_at: trx.fn.now(),
+      });
+      await trx('sync_runs').where({ id: syncRunId }).update({
+        status: 'COMPLETED', records_processed: recordsProcessed, completed_at: trx.fn.now(),
+      });
+    });
+  }
+
+  public async failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void> {
+    await this.database('sync_runs').where({ id: syncRunId }).update({
+      status: 'FAILED', records_processed: recordsProcessed, error_message: safeMessage, completed_at: this.database.fn.now(),
+    });
+  }
+}
+
+export const gmailHistoricalRepository = new KnexGmailHistoricalRepository();
