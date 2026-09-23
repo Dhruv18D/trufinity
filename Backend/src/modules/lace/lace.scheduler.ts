@@ -5,11 +5,17 @@ import { logger } from '../../utils/logger';
 import { laceCallAnalysisIngestionService } from './ingestion/call-analysis.ingestion';
 import { laceAgentPerformanceIngestionService } from './ingestion/agent-performance.ingestion';
 import { LaceSyncInProgressError } from './ingestion/lace-raw.ingestion';
+import { callAnalysisCanonicalService } from './canonical/call-analysis.canonical.service';
 
 interface LaceScheduledSync {
   exportType: string;
   cronExpression: string;
   run: () => Promise<{ syncRunId: string; recordsProcessed: number; filesProcessed: number; filesFailed: number }>;
+  // Runs after a successful (or partially-successful) raw sync. Without this,
+  // canonical_lace_calls never gets populated in production: it was
+  // previously reachable only via a dev-only route that 403s outside
+  // NODE_ENV=development, so nothing ever ran it once the scheduler took over.
+  afterSuccess?: () => Promise<void>;
 }
 
 const SCHEDULED_SYNCS: LaceScheduledSync[] = [
@@ -17,6 +23,10 @@ const SCHEDULED_SYNCS: LaceScheduledSync[] = [
     exportType: 'call_analysis',
     cronExpression: env.LACE_CALL_ANALYSIS_CRON,
     run: () => laceCallAnalysisIngestionService.run(),
+    afterSuccess: async () => {
+      const result = await callAnalysisCanonicalService.sync();
+      logger.info('[LaceAI] Canonical call analysis sync completed after scheduled ingestion', result);
+    },
   },
   {
     exportType: 'agent_performance',
@@ -52,6 +62,18 @@ async function runScheduledSync(sync: LaceScheduledSync): Promise<void> {
       logger.error(`[LaceAI] Scheduled ${sync.exportType} sync completed with per-file failures`, result);
     } else {
       logger.info(`[LaceAI] Scheduled ${sync.exportType} sync completed`, result);
+    }
+
+    if (sync.afterSuccess) {
+      try {
+        await sync.afterSuccess();
+      } catch (afterError) {
+        // The raw sync itself succeeded; a downstream step failing shouldn't
+        // be reported as an ingestion failure, but it must still be loud.
+        logger.error(`[LaceAI] Post-sync step failed for ${sync.exportType}`, {
+          error: afterError instanceof Error ? afterError.message : String(afterError),
+        });
+      }
     }
   } catch (error) {
     // A sync already in progress (e.g. a manual dev trigger overlapping the

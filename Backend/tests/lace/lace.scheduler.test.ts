@@ -2,6 +2,7 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 
 const callAnalysisRun = jest.fn<() => Promise<unknown>>();
 const agentPerformanceRun = jest.fn<() => Promise<unknown>>();
+const canonicalSync = jest.fn<() => Promise<unknown>>();
 const scheduledTasks: string[] = [];
 
 jest.mock('../../src/modules/lace/ingestion/call-analysis.ingestion', () => ({
@@ -9,6 +10,9 @@ jest.mock('../../src/modules/lace/ingestion/call-analysis.ingestion', () => ({
 }));
 jest.mock('../../src/modules/lace/ingestion/agent-performance.ingestion', () => ({
   laceAgentPerformanceIngestionService: { run: agentPerformanceRun },
+}));
+jest.mock('../../src/modules/lace/canonical/call-analysis.canonical.service', () => ({
+  callAnalysisCanonicalService: { sync: canonicalSync },
 }));
 jest.mock('node-cron', () => ({
   schedule: (expression: string, handler: () => void) => {
@@ -33,14 +37,42 @@ describe('Lace scheduler', () => {
   });
 
   it('running a scheduled tick calls the ingestion service', async () => {
-    callAnalysisRun.mockResolvedValue({ syncRunId: 'run-1', recordsProcessed: 5, filesProcessed: 1 });
+    callAnalysisRun.mockResolvedValue({ syncRunId: 'run-1', recordsProcessed: 5, filesProcessed: 1, filesFailed: 0 });
+    canonicalSync.mockResolvedValue({ rowsUpserted: 5 });
     const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
 
     const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
     tasks[0].handler();
     await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(callAnalysisRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('chains canonical sync after a successful call-analysis raw sync (afterSuccess)', async () => {
+    callAnalysisRun.mockResolvedValue({ syncRunId: 'run-1', recordsProcessed: 5, filesProcessed: 1, filesFailed: 0 });
+    canonicalSync.mockResolvedValue({ rowsUpserted: 5 });
+    const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
+
+    const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
+    tasks[0].handler();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(canonicalSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a canonical-sync failure be mistaken for an ingestion failure', async () => {
+    callAnalysisRun.mockResolvedValue({ syncRunId: 'run-1', recordsProcessed: 5, filesProcessed: 1, filesFailed: 0 });
+    canonicalSync.mockRejectedValue(new Error('canonical sync boom'));
+    const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
+
+    const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
+    expect(() => tasks[0].handler()).not.toThrow();
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(canonicalSync).toHaveBeenCalledTimes(1);
   });
 
   it('swallows a LaceSyncInProgressError from an overlapping run instead of crashing', async () => {
