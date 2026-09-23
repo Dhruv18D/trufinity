@@ -39,4 +39,32 @@ describe('parseLaceCsv', () => {
     expect(rows[1]['Agent id']).toBe('');
     expect(rows[1]['Agent name']).toBe('TOTAL / TENANT');
   });
+
+  it('returns an empty array for empty input', () => {
+    expect(parseLaceCsv('')).toEqual([]);
+  });
+
+  it('returns an empty array for header-only input (no data rows)', () => {
+    expect(parseLaceCsv('a,b,c\n')).toEqual([]);
+  });
+
+  it('unescapes a quoted field containing a comma instead of splitting it into extra columns', () => {
+    const rows = parseLaceCsv('Short summary,Booked\n"Customer said, quote, unquote","Booked"\n');
+    expect(rows).toEqual([{ 'Short summary': 'Customer said, quote, unquote', Booked: 'Booked' }]);
+  });
+
+  it('unescapes a quoted field containing an embedded newline', () => {
+    const rows = parseLaceCsv('Short summary,Booked\n"Line one\nLine two","Booked"\n');
+    expect(rows[0]['Short summary']).toBe('Line one\nLine two');
+  });
+
+  it('tolerates a row with fewer columns than the header (relax_column_count) instead of throwing', () => {
+    const rows = parseLaceCsv('a,b,c\n1,2\n');
+    expect(rows).toEqual([{ a: '1', b: '2' }]);
+  });
+
+  it('tolerates a row with more columns than the header (relax_column_count) instead of throwing', () => {
+    const rows = parseLaceCsv('a,b,c\n1,2,3,4\n');
+    expect(rows).toEqual([{ a: '1', b: '2', c: '3' }]);
+  });
 });

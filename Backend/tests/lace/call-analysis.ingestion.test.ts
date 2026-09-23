@@ -7,7 +7,7 @@ import {
   LaceCallAnalysisIngestionService,
 } from '../../src/modules/lace/ingestion/call-analysis.ingestion';
 import type { LaceObjectStore } from '../../src/modules/lace/s3.client';
-import type { LaceS3Object } from '../../src/modules/lace/types';
+import type { LaceS3Object } from '../../src/modules/lace/lace.types';
 
 type StoredRecord = { sourceId: string; payload: Record<string, unknown>; isLatest: boolean; syncRunId: string };
 
@@ -87,7 +87,7 @@ const HEADER =
   'CRM,CSR,Tags,Booked,Company,Campaign,Call link,Qualified,Job number,Objections,CRM call id,CRM tenant id,Customer name,Short summary,Call direction,Customer phone,Duration (sec),Playbook score,Unbooked reason,Existing customer,Cancellation reason,Date received (UTC),Time received (UTC),Date received (Local),Qualification details,Time received (Local)';
 
 function csvRow(callId: string, booked: string, callLink = `https://www.lace.ai/app/call-center-all-calls/${callId}`): string {
-  return `SERVICE_TITAN,Dana Whitfield,Appointment Set,${booked},Northwind Plumbing,Organic,${callLink},Yes,JOB-1,,ST-1,2088992281,Jane Doe,"Summary text",Inbound,+1 555-0100,300,90,,yes,,2026-08-24,12:00:00,2026-08-24,"Qualification text",07:00:00`;
+  return `SERVICE_TITAN,Dana Whitfield,Appointment Set,${booked},Northwind Plumbing,Organic,${callLink},Yes,JOB-1,,ST-1,0000000000,Jane Doe,"Summary text",Inbound,+1 555-0100,300,90,,yes,,2026-08-24,12:00:00,2026-08-24,"Qualification text",07:00:00`;
 }
 
 function fileObject(key: string, eTag: string): LaceS3Object {

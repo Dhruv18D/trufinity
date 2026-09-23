@@ -3,7 +3,7 @@ import { NodeHttpHandler } from '@aws-sdk/node-http-handler';
 import { Agent as HttpsAgent } from 'https';
 import type { Readable } from 'stream';
 import { env } from '../../config/env';
-import type { LaceS3Object } from './types';
+import type { LaceS3Object } from './lace.types';
 
 export interface LaceObjectStore {
   listObjects(prefix: string): Promise<LaceS3Object[]>;

@@ -1,4 +1,4 @@
-import type { LaceCallAnalysisRow } from '../types';
+import type { LaceCallAnalysisRow } from '../lace.types';
 
 export interface CanonicalLaceCall {
   laceCallId: string;

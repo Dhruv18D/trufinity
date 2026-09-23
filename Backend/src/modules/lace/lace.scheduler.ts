@@ -2,6 +2,7 @@ import cron, { type ScheduledTask } from 'node-cron';
 import { db } from '../../database';
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
+import { SYNC_RUNS_TABLE, SYNC_RUN_STATUS, SOURCE_SYSTEM } from '../../utils/sync-run.constants';
 import { laceCallAnalysisIngestionService } from './ingestion/call-analysis.ingestion';
 import { laceAgentPerformanceIngestionService } from './ingestion/agent-performance.ingestion';
 import { LaceSyncInProgressError } from './ingestion/lace-raw.ingestion';
@@ -41,13 +42,13 @@ const SCHEDULED_SYNCS: LaceScheduledSync[] = [
 const REPEATED_FAILURE_STREAK_THRESHOLD = 3;
 
 async function logIfRepeatedlyFailing(exportType: string): Promise<void> {
-  const recentRuns: { status: string }[] = await db('sync_runs')
-    .where({ source_system: 'LaceAI', entity_type: exportType })
+  const recentRuns: { status: string }[] = await db(SYNC_RUNS_TABLE)
+    .where({ source_system: SOURCE_SYSTEM.LACE_AI, entity_type: exportType })
     .orderBy('started_at', 'desc')
     .limit(REPEATED_FAILURE_STREAK_THRESHOLD)
     .select('status');
 
-  const allFailed = recentRuns.length === REPEATED_FAILURE_STREAK_THRESHOLD && recentRuns.every((r) => r.status === 'FAILED');
+  const allFailed = recentRuns.length === REPEATED_FAILURE_STREAK_THRESHOLD && recentRuns.every((r) => r.status === SYNC_RUN_STATUS.FAILED);
   if (allFailed) {
     logger.error(`[LaceAI] ${exportType} has failed its last ${REPEATED_FAILURE_STREAK_THRESHOLD} runs in a row - needs operator attention`, {
       exportType,
@@ -97,18 +98,20 @@ async function runScheduledSync(sync: LaceScheduledSync): Promise<void> {
 // when either sync next happens to fire.
 async function reapStuckRuns(): Promise<void> {
   const cutoff = new Date(Date.now() - env.LACE_STUCK_RUN_THRESHOLD_MINUTES * 60_000);
-  const stuck = await db('sync_runs')
-    .where({ source_system: 'LaceAI', status: 'RUNNING' })
+  const stuck = await db(SYNC_RUNS_TABLE)
+    .where({ source_system: SOURCE_SYSTEM.LACE_AI, status: SYNC_RUN_STATUS.RUNNING })
     .andWhere('started_at', '<', cutoff)
     .update({
-      status: 'FAILED',
+      status: SYNC_RUN_STATUS.FAILED,
       error_message: `Sync run exceeded ${env.LACE_STUCK_RUN_THRESHOLD_MINUTES} minutes in RUNNING state and was marked stuck.`,
       completed_at: db.fn.now(),
     })
     .returning('id');
 
   if (stuck.length > 0) {
-    logger.error('[LaceAI] Reaped stuck sync run(s)', { count: stuck.length, thresholdMinutes: env.LACE_STUCK_RUN_THRESHOLD_MINUTES });
+    // A recovered/reaped run is a handled outcome, not an unhandled error -
+    // it should be visible without being alarm-level noise in the logs.
+    logger.warn('[LaceAI] Reaped stuck sync run(s)', { count: stuck.length, thresholdMinutes: env.LACE_STUCK_RUN_THRESHOLD_MINUTES });
   }
 }
 
@@ -117,16 +120,16 @@ async function reapStuckRuns(): Promise<void> {
 // the Express app in tests doesn't also spin up background cron jobs.
 export function startLaceScheduler(): ScheduledTask[] {
   const tasks = SCHEDULED_SYNCS.map((sync) => {
-    const task = cron.schedule(sync.cronExpression, () => {
-      void runScheduledSync(sync);
-    });
+    // Returning the promise (rather than firing-and-forgetting it) lets
+    // node-cron - and tests - actually await a tick's completion.
+    const task = cron.schedule(sync.cronExpression, () => runScheduledSync(sync));
     logger.info(`[LaceAI] Scheduled ${sync.exportType} sync (cron: ${sync.cronExpression})`);
     return task;
   });
 
-  const reaperTask = cron.schedule(env.LACE_STUCK_RUN_REAPER_CRON, () => {
-    void reapStuckRuns().catch((error) => logger.error('[LaceAI] Stuck-run reaper failed', { error: error instanceof Error ? error.message : String(error) }));
-  });
+  const reaperTask = cron.schedule(env.LACE_STUCK_RUN_REAPER_CRON, () =>
+    reapStuckRuns().catch((error) => logger.error('[LaceAI] Stuck-run reaper failed', { error: error instanceof Error ? error.message : String(error) })),
+  );
   logger.info(`[LaceAI] Scheduled stuck-run reaper (cron: ${env.LACE_STUCK_RUN_REAPER_CRON})`);
 
   return [...tasks, reaperTask];

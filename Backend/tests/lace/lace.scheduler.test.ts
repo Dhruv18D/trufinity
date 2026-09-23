@@ -3,6 +3,8 @@ import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 const callAnalysisRun = jest.fn<() => Promise<unknown>>();
 const agentPerformanceRun = jest.fn<() => Promise<unknown>>();
 const canonicalSync = jest.fn<() => Promise<unknown>>();
+const loggerInfo = jest.fn();
+const loggerError = jest.fn();
 const scheduledTasks: string[] = [];
 
 jest.mock('../../src/modules/lace/ingestion/call-analysis.ingestion', () => ({
@@ -14,6 +16,9 @@ jest.mock('../../src/modules/lace/ingestion/agent-performance.ingestion', () => 
 jest.mock('../../src/modules/lace/canonical/call-analysis.canonical.service', () => ({
   callAnalysisCanonicalService: { sync: canonicalSync },
 }));
+jest.mock('../../src/utils/logger', () => ({
+  logger: { info: loggerInfo, error: loggerError, warn: jest.fn(), debug: jest.fn() },
+}));
 jest.mock('node-cron', () => ({
   schedule: (expression: string, handler: () => void) => {
     scheduledTasks.push(expression);
@@ -21,9 +26,14 @@ jest.mock('node-cron', () => ({
   },
 }));
 
+// Each test dynamically imports the scheduler fresh (resetModules), so the
+// module-level SCHEDULED_SYNCS array and its captured mock references can't
+// leak state between tests - the previous version relied on jest.clearAllMocks()
+// alone, which resets call history but not module state.
 describe('Lace scheduler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.resetModules();
     scheduledTasks.length = 0;
   });
 
@@ -41,10 +51,8 @@ describe('Lace scheduler', () => {
     canonicalSync.mockResolvedValue({ rowsUpserted: 5 });
     const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
 
-    const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
-    tasks[0].handler();
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    const tasks = startLaceScheduler() as unknown as { handler: () => Promise<void> }[];
+    await tasks[0].handler();
 
     expect(callAnalysisRun).toHaveBeenCalledTimes(1);
   });
@@ -54,10 +62,8 @@ describe('Lace scheduler', () => {
     canonicalSync.mockResolvedValue({ rowsUpserted: 5 });
     const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
 
-    const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
-    tasks[0].handler();
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    const tasks = startLaceScheduler() as unknown as { handler: () => Promise<void> }[];
+    await tasks[0].handler();
 
     expect(canonicalSync).toHaveBeenCalledTimes(1);
   });
@@ -67,23 +73,29 @@ describe('Lace scheduler', () => {
     canonicalSync.mockRejectedValue(new Error('canonical sync boom'));
     const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
 
-    const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
-    expect(() => tasks[0].handler()).not.toThrow();
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    const tasks = startLaceScheduler() as unknown as { handler: () => Promise<void> }[];
+    await expect(tasks[0].handler()).resolves.toBeUndefined();
 
     expect(canonicalSync).toHaveBeenCalledTimes(1);
+    // The failure must be logged loudly (as a post-sync error), not swallowed silently.
+    expect(loggerError).toHaveBeenCalledWith(
+      expect.stringContaining('Post-sync step failed'),
+      expect.objectContaining({ error: 'canonical sync boom' }),
+    );
   });
 
-  it('swallows a LaceSyncInProgressError from an overlapping run instead of crashing', async () => {
+  it('swallows a LaceSyncInProgressError from an overlapping run instead of crashing, and logs it at info level', async () => {
     const { LaceSyncInProgressError } = await import('../../src/modules/lace/ingestion/lace-raw.ingestion');
     callAnalysisRun.mockRejectedValue(new LaceSyncInProgressError('call_analysis'));
     const { startLaceScheduler } = await import('../../src/modules/lace/lace.scheduler');
 
-    const tasks = startLaceScheduler() as unknown as { handler: () => void }[];
-    expect(() => tasks[0].handler()).not.toThrow();
-    await new Promise((resolve) => setImmediate(resolve));
+    const tasks = startLaceScheduler() as unknown as { handler: () => Promise<void> }[];
+    await expect(tasks[0].handler()).resolves.toBeUndefined();
 
     expect(callAnalysisRun).toHaveBeenCalledTimes(1);
+    expect(loggerInfo).toHaveBeenCalledWith(expect.stringContaining('skipped: already running'));
+    expect(loggerError).not.toHaveBeenCalled();
+    // The overlap is expected, not a failure - canonical sync must not run off stale/no data.
+    expect(canonicalSync).not.toHaveBeenCalled();
   });
 });

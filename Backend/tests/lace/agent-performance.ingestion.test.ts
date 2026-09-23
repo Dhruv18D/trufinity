@@ -7,7 +7,7 @@ import {
   LaceAgentPerformanceIngestionService,
 } from '../../src/modules/lace/ingestion/agent-performance.ingestion';
 import type { LaceObjectStore } from '../../src/modules/lace/s3.client';
-import type { LaceS3Object } from '../../src/modules/lace/types';
+import type { LaceS3Object } from '../../src/modules/lace/lace.types';
 
 type StoredRecord = { sourceId: string; payload: Record<string, unknown>; isLatest: boolean };
 

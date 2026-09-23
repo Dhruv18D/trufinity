@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import { mapCallAnalysisRowToCanonical } from '../../src/modules/lace/canonical/call-analysis.mapper';
-import type { LaceCallAnalysisRow } from '../../src/modules/lace/types';
+import type { LaceCallAnalysisRow } from '../../src/modules/lace/lace.types';
 
 function baseRow(overrides: Partial<LaceCallAnalysisRow> = {}): LaceCallAnalysisRow {
   return {
@@ -15,7 +15,7 @@ function baseRow(overrides: Partial<LaceCallAnalysisRow> = {}): LaceCallAnalysis
     'Job number': '64981289',
     Objections: 'Service Fee Concerns, Other, Customer Data Privacy Concerns',
     'CRM call id': '65046054',
-    'CRM tenant id': '2088992281',
+    'CRM tenant id': '0000000000',
     'Customer name': 'Don Habijanac',
     'Short summary': 'Summary text',
     'Call direction': 'Inbound',

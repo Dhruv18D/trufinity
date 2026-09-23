@@ -26,58 +26,75 @@ function insertAlert(overrides: Partial<Record<string, unknown>> = {}) {
     baseline_value: 0.8,
     details: { dropPoints: 30 },
     ...overrides,
-  });
+  }).returning('id');
 }
 
+function extractId(row: unknown): string {
+  return typeof row === 'object' && row !== null && 'id' in row ? String((row as { id: unknown }).id) : String(row);
+}
+
+// NarrateService.run() intentionally operates on the whole detected_alerts
+// table (it must narrate every pending alert in production, not a filtered
+// slice) - so its aggregate { narrated, failed } counts are NOT assertable
+// here: Jest runs test files concurrently against the same shared dev
+// database, and Detect/Deliver tests insert their own unnarrated rows into
+// this same table at the same time. Every test below instead asserts the
+// outcome for the specific row(s) it created, looked up by id.
 describe('NarrateService', () => {
   beforeEach(async () => {
     await db('detected_alerts').where('period_start', '>=', '2096-01-01').delete();
   });
 
-  it('narrates every alert missing a narrative and persists the result', async () => {
-    await insertAlert();
+  it('narrates an alert missing a narrative and persists the result', async () => {
+    const [row] = await insertAlert();
+    const id = extractId(row);
     const fakeClient: NarrationClient = { narrate: jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockResolvedValue('Booking rate dropped from 80% to 50%.') };
 
-    const result = await new NarrateService(fakeClient).run();
+    await new NarrateService(fakeClient).run();
 
-    expect(result).toEqual({ narrated: 1, failed: 0 });
-    const row = await db('detected_alerts').where('period_start', '>=', '2096-01-01').first();
-    expect(row.narrative).toBe('Booking rate dropped from 80% to 50%.');
-    expect(row.narrated_at).not.toBeNull();
+    const updated = await db('detected_alerts').where({ id }).first();
+    expect(updated.narrative).toBe('Booking rate dropped from 80% to 50%.');
+    expect(updated.narrated_at).not.toBeNull();
   });
 
   it('skips alerts that already have a narrative', async () => {
-    await insertAlert({ narrative: 'Already narrated.', narrated_at: new Date() });
-    const fakeClient: NarrationClient = { narrate: jest.fn<(alert: DetectedAlertRow) => Promise<string>>() };
+    const [row] = await insertAlert({ narrative: 'Already narrated.', narrated_at: new Date() });
+    const id = extractId(row);
+    const narrateMock = jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockResolvedValue('should not be called for this row');
 
-    const result = await new NarrateService(fakeClient).run();
+    await new NarrateService({ narrate: narrateMock }).run();
 
-    expect(result).toEqual({ narrated: 0, failed: 0 });
-    expect(fakeClient.narrate).not.toHaveBeenCalled();
+    const unchanged = await db('detected_alerts').where({ id }).first();
+    expect(unchanged.narrative).toBe('Already narrated.');
+    expect(narrateMock.mock.calls.every((call) => call[0].id !== id)).toBe(true);
   });
 
   it('counts a failure without blocking other alerts, and leaves the failed row unnarrated', async () => {
-    const [failingId] = await insertAlert({ dimension: 'A' }).returning('id');
-    await insertAlert({ dimension: 'B', rule_code: 'D-06' });
+    const [failingRow] = await insertAlert({ dimension: 'A' });
+    const [okRow] = await insertAlert({ dimension: 'B', rule_code: 'D-06' });
+    const failingId = extractId(failingRow);
+    const okId = extractId(okRow);
     const narrateMock = jest.fn<(alert: DetectedAlertRow) => Promise<string>>()
       .mockImplementation(async (alert) => {
-        if (alert.dimension === 'A') throw new Error('model error');
+        if (alert.id === failingId) throw new Error('model error');
         return 'Objection category spiked.';
       });
 
-    const result = await new NarrateService({ narrate: narrateMock }).run();
+    await new NarrateService({ narrate: narrateMock }).run();
 
-    expect(result).toEqual({ narrated: 1, failed: 1 });
-    const failedRow = await db('detected_alerts').where({ id: typeof failingId === 'object' ? failingId.id : failingId }).first();
+    const failedRow = await db('detected_alerts').where({ id: failingId }).first();
     expect(failedRow.narrative).toBeNull();
+    const okRowAfter = await db('detected_alerts').where({ id: okId }).first();
+    expect(okRowAfter.narrative).toBe('Objection category spiked.');
   });
 
   it('passes only the stored numbers to the narration client (no recomputation surface)', async () => {
-    await insertAlert({ metric_value: 0.42, baseline_value: 0.77, details: { dropPoints: 35 } });
+    const [row] = await insertAlert({ metric_value: 0.42, baseline_value: 0.77, details: { dropPoints: 35 } });
+    const id = extractId(row);
     let captured: DetectedAlertRow | undefined;
     const fakeClient: NarrationClient = {
       narrate: jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockImplementation(async (alert) => {
-        captured = alert;
+        if (alert.id === id) captured = alert;
         return 'narrated';
       }),
     };
@@ -90,17 +107,19 @@ describe('NarrateService', () => {
   });
 
   it('blocks delivery (SPEC-BI-001 Section 9) when the model writes a number absent from the source payload', async () => {
-    await insertAlert();
-    // 99 does not appear anywhere in the payload (metric 50%, baseline 80%, dropPoints 30) - an invented figure.
+    const [row] = await insertAlert();
+    const id = extractId(row);
+    // 99 does not appear anywhere in this row's payload (metric 50%, baseline 80%, dropPoints 30) - an invented figure.
     const fakeClient: NarrationClient = {
-      narrate: jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockResolvedValue('Booking rate dropped 99% this week.'),
+      narrate: jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockImplementation(async (alert) =>
+        alert.id === id ? 'Booking rate dropped 99% this week.' : 'narrated',
+      ),
     };
 
-    const result = await new NarrateService(fakeClient).run();
+    await new NarrateService(fakeClient).run();
 
-    expect(result).toEqual({ narrated: 0, failed: 1 });
-    const row = await db('detected_alerts').where('period_start', '>=', '2096-01-01').first();
-    expect(row.narrative).toBeNull();
+    const updated = await db('detected_alerts').where({ id }).first();
+    expect(updated.narrative).toBeNull();
   });
 });
 

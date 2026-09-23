@@ -66,7 +66,30 @@ const envSchema = z.object({
   NARRATE_MODEL: z.string().default('claude-opus-5'),
 });
 
-const _env = envSchema.safeParse(process.env);
+// A missing S3 secret must fail fast at startup in production, not surface
+// later as a cryptic AWS SDK auth error the first time ingestion runs.
+const productionEnvSchema = envSchema.superRefine((data, ctx) => {
+  if (data.NODE_ENV !== 'production') return;
+  if (data.LACE_S3_SECRET_ACCESS_KEY.length < 20) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['LACE_S3_SECRET_ACCESS_KEY'],
+      message: 'LACE_S3_SECRET_ACCESS_KEY is required (min 20 chars) when NODE_ENV=production.',
+    });
+  }
+  if (data.LACE_S3_ACCESS_KEY_ID.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['LACE_S3_ACCESS_KEY_ID'],
+      message: 'LACE_S3_ACCESS_KEY_ID is required when NODE_ENV=production.',
+    });
+  }
+  if (data.LACE_S3_BUCKET.length === 0) {
+    ctx.addIssue({ code: 'custom', path: ['LACE_S3_BUCKET'], message: 'LACE_S3_BUCKET is required when NODE_ENV=production.' });
+  }
+});
+
+const _env = productionEnvSchema.safeParse(process.env);
 
 if (!_env.success) {
   console.error('? Invalid environment variables:', _env.error.format());

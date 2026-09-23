@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import { db } from '../../../database';
 import { logger } from '../../../utils/logger';
-import type { LaceCallAnalysisRow } from '../types';
+import type { LaceCallAnalysisRow } from '../lace.types';
 import { mapCallAnalysisRowToCanonical } from './call-analysis.mapper';
 
 interface RawCallAnalysisRow {
