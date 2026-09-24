@@ -11,6 +11,28 @@ export interface QboQueryResponse<T> {
   time: string;
 }
 
+export const QBO_CDC_ENTITIES = ['Customer', 'Account', 'Invoice', 'Payment'] as const;
+export type QboCdcEntity = typeof QBO_CDC_ENTITIES[number];
+
+export interface QboCdcQueryResponse {
+  Customer?: unknown[];
+  Account?: unknown[];
+  Invoice?: unknown[];
+  Payment?: unknown[];
+  startPosition?: number;
+  maxResults?: number;
+  totalCount?: number;
+}
+
+export interface QboCdcGroup {
+  QueryResponse: QboCdcQueryResponse[];
+}
+
+export interface QboCdcResponse {
+  CDCResponse: QboCdcGroup[];
+  time: string;
+}
+
 export interface QboCompanyInfo {
   CompanyName?: string;
   LegalName?: string;

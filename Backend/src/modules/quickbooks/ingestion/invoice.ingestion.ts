@@ -5,6 +5,8 @@ import { logger } from '../../../utils/logger';
 import { qboInvoiceService } from '../services/invoice.service';
 import type { QboInvoice, QboQueryResponse } from '../types';
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const PAGE_SIZE = 1000; const MAX_ATTEMPTS = 3;
 interface InvoiceApi { getInvoicesPage(position: number, maxResults: number): Promise<QboQueryResponse<QboInvoice>>; }
 
@@ -18,10 +20,10 @@ export class QboInvoiceIngestionService {
       const inserted = await this.database('sync_runs').insert({ source_system: 'QuickBooks', entity_type: 'Invoices', status: 'RUNNING' }).returning('id'); runId = inserted[0].id as string;
       const metadata = await this.database('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Invoices' }).first('continuation_token'); const stored = metadata?.continuation_token ? Number(metadata.continuation_token) : 1; let position = Number.isInteger(stored) && stored > 0 ? stored : 1; let hasMore = true;
       while (hasMore) {
-        const response = await this.fetchPage(position); const page = response.QueryResponse; if (!page || !Array.isArray(page.Invoice)) throw new Error('Malformed QuickBooks Invoice response.');
-        const valid: { id: string; payload: QboInvoice }[] = []; const invalid: unknown[] = []; for (const payload of page.Invoice) { const id = payload && typeof payload.Id === 'string' && payload.Id.trim() ? payload.Id : null; if (id) valid.push({ id, payload }); else invalid.push(payload); }
+        const response = await this.fetchPage(position); const page = response.QueryResponse; if (!isRecord(page)) throw new Error('Malformed QuickBooks Invoice response.'); const invoiceValue = page.Invoice; if (invoiceValue === undefined) { const allowedEmptyPageKeys = new Set(['startPosition', 'maxResults', 'totalCount']); if (Object.keys(page).some((key) => !allowedEmptyPageKeys.has(key))) throw new Error('Malformed QuickBooks Invoice response.'); hasMore = false; await this.database('raw_sync_metadata').insert({ source_system: 'QuickBooks', entity_type: 'Invoices', continuation_token: null, last_synced_at: this.database.fn.now() }).onConflict(['source_system', 'entity_type']).merge({ continuation_token: null, last_synced_at: this.database.fn.now() }); continue; } if (!Array.isArray(invoiceValue)) throw new Error('Malformed QuickBooks Invoice response.'); const invoices = invoiceValue;
+        const valid: { id: string; payload: QboInvoice }[] = []; const invalid: unknown[] = []; for (const payload of invoices) { const id = payload && typeof payload.Id === 'string' && payload.Id.trim() ? payload.Id : null; if (id) valid.push({ id, payload }); else invalid.push(payload); }
         await this.database.transaction(async (trx) => { for (const record of valid) { await trx('raw_qbo_invoices').where({ source_id: record.id, is_latest: true }).update({ is_latest: false }); await trx('raw_qbo_invoices').insert({ source_id: record.id, payload: record.payload, is_latest: true, sync_run_id: runId }); } if (invalid.length) await trx('sync_errors').insert(invalid.map((payload) => ({ sync_run_id: runId, source_id: null, error_message: 'Invoice payload is missing a valid Id.', payload }))); });
-        processed += valid.length; const max = page.maxResults ?? PAGE_SIZE; hasMore = page.totalCount !== undefined ? position + page.Invoice.length <= page.totalCount : page.Invoice.length === max; position += page.Invoice.length;
+        processed += valid.length; const max = page.maxResults ?? PAGE_SIZE; hasMore = invoices.length === max; position += invoices.length;
         await this.database('raw_sync_metadata').insert({ source_system: 'QuickBooks', entity_type: 'Invoices', continuation_token: hasMore ? String(position) : null, last_synced_at: this.database.fn.now() }).onConflict(['source_system', 'entity_type']).merge({ continuation_token: hasMore ? String(position) : null, last_synced_at: this.database.fn.now() });
       }
       await this.database('sync_runs').where({ id: runId }).update({ status: 'COMPLETED', records_processed: processed, completed_at: this.database.fn.now() }); return { syncRunId: runId, recordsProcessed: processed };

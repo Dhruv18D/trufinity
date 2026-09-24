@@ -9,10 +9,14 @@ export const errorHandler = (
 ) => {
   logger.error(`Error: ${err.message}`, { stack: err.stack });
 
+  // err.message can carry internal detail (S3 object keys, DB identifiers,
+  // ...) that shouldn't reach a client outside development - it's already
+  // logged above for operators.
+  const isDevelopment = process.env.NODE_ENV === 'development';
   res.status(500).json({
     status: 'error',
-    message: err.message || 'Internal Server Error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+    message: isDevelopment ? err.message || 'Internal Server Error' : 'Internal Server Error',
+    ...(isDevelopment && { stack: err.stack }),
   });
 };
 
