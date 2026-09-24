@@ -1,20 +1,29 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { StatCard } from "@/components/ui/StatCard";
+import { FinancialOverview, FinancialOverviewSkeleton } from "@/components/sections/FinancialOverview";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { PriorityBadge } from "@/components/ui/Badge";
-import { companyMeta, flaggedItems, overviewKpis } from "@/lib/mock-data";
+import { PendingState } from "@/components/ui/States";
+import { companyMeta } from "@/lib/company";
+import { formatReportDate } from "@/lib/format";
+import { sectionReady } from "@/lib/sections";
+import type { FlaggedItem } from "@/lib/types";
+
+// TODO: replace with alerts API data once available.
+const flaggedItems: FlaggedItem[] = [];
 
 const quickLinks = [
-  { href: "/daily-brief", label: "Daily Executive Brief", description: "Today's summary, highlights & watch-outs", icon: "sun" },
+  { href: "/daily-brief", label: "Daily Executive Brief", description: "Today's brief in the fixed spec section order", icon: "sun" },
   { href: "/scorecard", label: "Scorecard", description: "KPIs vs. targets across the business", icon: "bar-chart" },
-  { href: "/escalations", label: "Customer Escalations", description: "3 open · 1 high priority", icon: "alert-circle" },
-  { href: "/red-flags", label: "Red Flags", description: "5 open items need review", icon: "flag" },
+  { href: "/escalations", label: "Customer Escalations", description: "Problem emails, calls & reviews", icon: "alert-circle" },
+  { href: "/red-flags", label: "Red Flags", description: "RED exceptions ranked by dollar impact", icon: "flag" },
   { href: "/responsiveness", label: "Responsiveness", description: "Phone, AI call agent & email response times", icon: "clock" },
   { href: "/marketing", label: "Marketing", description: "Google Ads & reputation performance", icon: "megaphone" },
-  { href: "/watchlist", label: "Watch List & Opportunities", description: "4 items to keep an eye on", icon: "eye" },
+  { href: "/watchlist", label: "Watch List & Opportunities", description: "AMBER watch items & BLUE opportunities", icon: "eye" },
   { href: "/closed-loop", label: "Closed Loop", description: "Recently resolved items", icon: "check-circle" },
+  { href: "/data-quality", label: "Data Quality", description: "QuickBooks sync health & integrity", icon: "wrench" },
 ] as const;
 
 export default function DashboardPage() {
@@ -24,7 +33,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title={`Good morning, Daniel`}
-        description={`Here's how ${companyMeta.shortName} is performing — ${companyMeta.reportDate}.`}
+        description={`Here's how ${companyMeta.shortName} is performing — ${formatReportDate()}.`}
         action={
           <Link
             href="/daily-brief"
@@ -36,11 +45,9 @@ export default function DashboardPage() {
         }
       />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-        {overviewKpis.map((metric) => (
-          <StatCard key={metric.id} metric={metric} />
-        ))}
-      </div>
+      <Suspense fallback={<FinancialOverviewSkeleton />}>
+        <FinancialOverview />
+      </Suspense>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2">
@@ -54,6 +61,9 @@ export default function DashboardPage() {
                 </Link>
               }
             />
+            {!(sectionReady.escalations || sectionReady.redFlags) ? (
+              <PendingState />
+            ) : (
             <div className="divide-y divide-border-subtle">
               {topAlerts.map((item) => (
                 <Link
@@ -73,26 +83,13 @@ export default function DashboardPage() {
                 </Link>
               ))}
             </div>
+            )}
           </Card>
         </div>
 
         <Card>
-          <CardHeader title="Today's highlights" subtitle="From the executive brief" />
-          <ul className="space-y-3">
-            {["Revenue 12.4% above weekday average", "6 membership renewals completed", "3 same-day jobs closed with 5★ reviews"].map((h) => (
-              <li key={h} className="flex items-start gap-2.5 text-sm text-foreground/75">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
-                {h}
-              </li>
-            ))}
-          </ul>
-          <Link
-            href="/daily-brief"
-            className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-teal-dark hover:underline"
-          >
-            Read full brief
-            <Icon name="chevron-right" className="h-3.5 w-3.5" />
-          </Link>
+          <CardHeader title="Demand Alerts" subtitle="D-series booking & objection exceptions" />
+          {!sectionReady.demandAlerts && <PendingState />}
         </Card>
       </div>
 

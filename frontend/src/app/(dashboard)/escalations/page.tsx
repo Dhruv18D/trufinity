@@ -1,7 +1,12 @@
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { FlaggedTable } from "@/components/flagged/FlaggedTable";
-import { flaggedItems } from "@/lib/mock-data";
+import { PendingState } from "@/components/ui/States";
+import { sectionReady } from "@/lib/sections";
+import type { FlaggedItem } from "@/lib/types";
+
+// TODO: replace with alerts API data once available.
+const flaggedItems: FlaggedItem[] = [];
 
 export default function EscalationsPage() {
   const escalations = flaggedItems.filter((item) => item.type === "escalation");
@@ -15,6 +20,10 @@ export default function EscalationsPage() {
         description="Direct complaints and disputes raised by customers across phone, chat, and ServiceTitan."
       />
 
+      {!sectionReady.escalations ? (
+        <PendingState />
+      ) : (
+      <>
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
         <Card>
           <p className="text-xs font-medium uppercase tracking-wide text-foreground/50">Total Escalations</p>
@@ -31,6 +40,8 @@ export default function EscalationsPage() {
       </div>
 
       <FlaggedTable items={escalations} />
+      </>
+      )}
     </div>
   );
 }

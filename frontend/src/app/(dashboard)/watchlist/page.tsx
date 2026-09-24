@@ -5,9 +5,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { EmptyState } from "@/components/ui/States";
-import { watchList } from "@/lib/mock-data";
+import { EmptyState, PendingState } from "@/components/ui/States";
+import { sectionReady } from "@/lib/sections";
 import type { WatchListItem } from "@/lib/types";
+
+// TODO: replace with watch list (AMBER) and opportunities (BLUE) API data once available.
+const watchList: WatchListItem[] = [];
 
 const tabs: { value: WatchListItem["category"] | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -40,7 +43,9 @@ export default function WatchListPage() {
         ))}
       </div>
 
-      {items.length === 0 ? (
+      {!(tab === "opportunity" ? sectionReady.opportunities : tab === "watch" ? sectionReady.watchList : sectionReady.watchList && sectionReady.opportunities) ? (
+        <PendingState />
+      ) : items.length === 0 ? (
         <EmptyState title="Nothing here yet" description="Items will appear once flagged from a report or added manually." />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

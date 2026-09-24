@@ -3,7 +3,8 @@
 import { usePathname } from "next/navigation";
 import { navItems } from "@/lib/nav";
 import { Icon } from "@/components/ui/Icon";
-import { companyMeta } from "@/lib/mock-data";
+import { companyMeta } from "@/lib/company";
+import { formatReportDate } from "@/lib/format";
 
 export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
   const pathname = usePathname();
@@ -21,7 +22,7 @@ export function Topbar({ onMenuClick }: { onMenuClick: () => void }) {
 
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-foreground">{active?.label ?? "Dashboard"}</p>
-        <p className="hidden truncate text-xs text-foreground/45 sm:block">{companyMeta.reportDate} &middot; {companyMeta.timezone}</p>
+        <p className="hidden truncate text-xs text-foreground/45 sm:block">{formatReportDate()} &middot; {companyMeta.timezone}</p>
       </div>
 
       <div className="hidden items-center gap-2 rounded-lg border border-border-subtle bg-surface-muted/60 px-3 py-2 text-sm text-foreground/40 md:flex md:w-64">

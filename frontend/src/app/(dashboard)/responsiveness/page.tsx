@@ -2,7 +2,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { StatusPill } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { responsiveness } from "@/lib/mock-data";
+import { PendingState } from "@/components/ui/States";
+import { sectionReady } from "@/lib/sections";
+import type { ResponsivenessRow } from "@/lib/types";
+
+// TODO: replace with responsiveness API data once available.
+const responsiveness: ResponsivenessRow[] = [];
 
 const channelIcon: Record<string, string> = {
   "Phone (Dialpad)": "clock",
@@ -19,6 +24,9 @@ export default function ResponsivenessPage() {
         description="How quickly the business responds to customers across phone, AI call agent, email, and reviews."
       />
 
+      {!sectionReady.responsiveness ? (
+        <PendingState />
+      ) : (
       <Card padded={false}>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[700px] text-left text-sm">
@@ -59,6 +67,7 @@ export default function ResponsivenessPage() {
           </table>
         </div>
       </Card>
+      )}
     </div>
   );
 }

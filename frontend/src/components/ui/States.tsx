@@ -81,3 +81,13 @@ export function SkeletonTable({ rows = 5 }: { rows?: number }) {
     </div>
   );
 }
+
+export function PendingState({ description }: { description?: string }) {
+  return (
+    <EmptyState
+      icon="clock"
+      title="No data yet — pending backend integration"
+      description={description ?? "This section will populate automatically once its backend API is connected."}
+    />
+  );
+}

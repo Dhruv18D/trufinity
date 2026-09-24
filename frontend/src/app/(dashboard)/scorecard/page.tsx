@@ -2,7 +2,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { StatusPill } from "@/components/ui/Badge";
 import { Sparkline } from "@/components/ui/Sparkline";
-import { scorecard } from "@/lib/mock-data";
+import { PendingState } from "@/components/ui/States";
+import { sectionReady } from "@/lib/sections";
+import type { ScorecardMetric } from "@/lib/types";
+
+// TODO: replace with scorecard API data once available.
+const scorecard: ScorecardMetric[] = [];
 
 const categories = Array.from(new Set(scorecard.map((s) => s.category)));
 
@@ -11,6 +16,9 @@ export default function ScorecardPage() {
     <div>
       <PageHeader title="Scorecard" description="Daily performance against target across every part of the business." />
 
+      {!sectionReady.scorecard ? (
+        <PendingState />
+      ) : (
       <div className="space-y-6">
         {categories.map((category) => (
           <Card key={category} padded={false}>
@@ -50,6 +58,7 @@ export default function ScorecardPage() {
           </Card>
         ))}
       </div>
+      )}
     </div>
   );
 }
