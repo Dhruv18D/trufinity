@@ -50,8 +50,14 @@ export class GmailIncrementalSyncService {
     try {
       return await this.repository.withMailboxLock(authorization.mailbox.normalizedAddress, async () => this.runLocked(authorization));
     } catch (error) {
-      if (error instanceof Error && error.message === 'GMAIL_HISTORY_404') {
-        // Fallback to historical sync without holding the lock
+      if (error instanceof Error && error.message.startsWith('GMAIL_HISTORY_404_INITIAL:')) {
+        const timestamp = parseInt(error.message.split(':')[1], 10);
+        if (Number.isFinite(timestamp)) {
+          return this.historicalService.runMailbox(mailboxAddress, new Date(timestamp));
+        }
+      }
+      if (error instanceof Error && error.message === 'GMAIL_HISTORY_404_EXPIRED') {
+        // Fallback to historical sync without holding the lock (full 365 days as per EXPIRED fallback rules)
         return this.historicalService.runMailbox(mailboxAddress);
       }
       throw error;
@@ -77,7 +83,10 @@ export class GmailIncrementalSyncService {
     const startHistoryId = metadata.historyId;
 
     if (!startHistoryId) {
-      throw new Error('GMAIL_HISTORY_404');
+      if (metadata.lastSuccessfulSyncAt) {
+        throw new Error(`GMAIL_HISTORY_404_INITIAL:${metadata.lastSuccessfulSyncAt.getTime()}`);
+      }
+      throw new Error('GMAIL_HISTORY_404_EXPIRED');
     }
 
     let syncRunId: string | null = null;
@@ -101,9 +110,9 @@ export class GmailIncrementalSyncService {
     } catch (error) {
       if (syncRunId) await this.repository.failSyncRun(syncRunId, processed, safeErrorMessage(error));
       
-      const err = error as any;
-      if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && err.response.status === 404) {
-         throw new Error('GMAIL_HISTORY_404', { cause: error });
+      const err = error as Record<string, unknown> | null;
+      if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && (err.response as Record<string, unknown>).status === 404) {
+         throw new Error('GMAIL_HISTORY_404_EXPIRED', { cause: error });
       }
       
       throw new Error(SAFE_FAILURE, { cause: error });
@@ -211,8 +220,8 @@ export class GmailIncrementalSyncService {
             });
           }
         } catch (error) {
-          const err = error as any;
-          if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && err.response.status === 404) {
+          const err = error as Record<string, unknown> | null;
+          if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && (err.response as Record<string, unknown>).status === 404) {
              writes.push({
                providerMessageId: msgId,
                threadId: '',

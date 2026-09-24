@@ -195,14 +195,14 @@ export class GmailHistoricalSyncService {
     private readonly now: () => number = Date.now,
   ) {}
 
-  public async runMailbox(mailboxAddress: string): Promise<GmailHistoricalSyncResult> {
+  public async runMailbox(mailboxAddress: string, explicitCutoff?: Date): Promise<GmailHistoricalSyncResult> {
     const mailboxes = await this.directoryService.discoverActiveMailboxes();
     const isDiscovered = mailboxes.some((m) => m.normalizedAddress === mailboxAddress.toLowerCase().trim());
     if (!isDiscovered) throw new Error('Mailbox is not eligible, suspended, archived, or not found in Google Workspace directory.');
 
     const authorization = this.authService.getGmailAuthorization(mailboxAddress);
     if (!isEligibleGmailSynchronizationMailbox(authorization.mailbox) || !hasLockedAuthorization(authorization)) throw new Error('Google Workspace Gmail historical synchronization requires a correctly authorized eligible mailbox.');
-    return this.repository.withMailboxLock(authorization.mailbox.normalizedAddress, async () => this.runLocked(authorization));
+    return this.repository.withMailboxLock(authorization.mailbox.normalizedAddress, async () => this.runLocked(authorization, explicitCutoff));
   }
 
   public async runAllEligibleMailboxes(): Promise<GmailHistoricalAllResult> {
@@ -216,7 +216,7 @@ export class GmailHistoricalSyncService {
     return { completed, failed };
   }
 
-  private async runLocked(authorization: GmailAuthorizationContext): Promise<GmailHistoricalSyncResult> {
+  private async runLocked(authorization: GmailAuthorizationContext, explicitCutoff?: Date): Promise<GmailHistoricalSyncResult> {
     const entityType = `GmailHistorical:${authorization.mailbox.normalizedAddress}`;
     await this.repository.recoverInterruptedRun(entityType);
     const mailbox = await this.repository.ensureMailbox(authorization.mailbox);
@@ -225,7 +225,7 @@ export class GmailHistoricalSyncService {
     let persisted = 0;
     try {
       syncRunId = await this.repository.createSyncRun(entityType);
-      const cutoff = new Date(this.now() - this.historicalDays * 24 * 60 * 60 * 1000);
+      const cutoff = explicitCutoff ?? new Date(this.now() - this.historicalDays * 24 * 60 * 60 * 1000);
       const seenMessageIds = new Set<string>();
       for (const label of INCLUDED_LABELS) {
         const result = await this.scanLabel(authorization, mailbox, syncRunId, label, cutoff, seenMessageIds);
