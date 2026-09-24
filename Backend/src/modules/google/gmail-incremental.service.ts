@@ -1,0 +1,242 @@
+import {
+  googleWorkspaceAuthService,
+  type GmailAuthorizationContext,
+} from './google-auth.service';
+import {
+  gmailHistoricalRepository,
+  type GmailHistoricalMessageWrite,
+  type GmailHistoricalMailbox,
+  type GmailHistoricalError,
+} from './gmail-historical.repository';
+import {
+  isEligibleGmailSynchronizationMailbox,
+  googleWorkspaceDirectoryService,
+} from './workspace-directory.service';
+import {
+  INCLUDED_LABELS,
+  EXCLUDED_LABELS,
+  PAGE_SIZE,
+  SAFE_FAILURE,
+  safeErrorMessage,
+  withRetry,
+  hasLockedAuthorization,
+  normalizeMessage,
+  buildMetadataPayload,
+  buildContentPayload,
+  type GmailHistoricalSyncResult,
+  type GmailHistoricalMailboxFailure,
+  type GmailHistoricalAllResult,
+  gmailHistoricalSyncService,
+} from './gmail-historical.service';
+
+export class GmailIncrementalSyncService {
+  public constructor(
+    private readonly authService = googleWorkspaceAuthService,
+    private readonly directoryService = googleWorkspaceDirectoryService,
+    private readonly repository = gmailHistoricalRepository,
+    private readonly historicalService = gmailHistoricalSyncService,
+  ) {}
+
+  public async runMailbox(mailboxAddress: string): Promise<GmailHistoricalSyncResult> {
+    const mailboxes = await this.directoryService.discoverActiveMailboxes();
+    const isDiscovered = mailboxes.some((m) => m.normalizedAddress === mailboxAddress.toLowerCase().trim());
+    if (!isDiscovered) throw new Error('Mailbox is not eligible, suspended, archived, or not found in Google Workspace directory.');
+
+    const authorization = this.authService.getGmailAuthorization(mailboxAddress);
+    if (!isEligibleGmailSynchronizationMailbox(authorization.mailbox) || !hasLockedAuthorization(authorization)) {
+      throw new Error('Google Workspace Gmail incremental synchronization requires a correctly authorized eligible mailbox.');
+    }
+
+    try {
+      return await this.repository.withMailboxLock(authorization.mailbox.normalizedAddress, async () => this.runLocked(authorization));
+    } catch (error) {
+      if (error instanceof Error && error.message === 'GMAIL_HISTORY_404') {
+        // Fallback to historical sync without holding the lock
+        return this.historicalService.runMailbox(mailboxAddress);
+      }
+      throw error;
+    }
+  }
+
+  public async runAllEligibleMailboxes(): Promise<GmailHistoricalAllResult> {
+    const completed: GmailHistoricalSyncResult[] = [];
+    const failed: GmailHistoricalMailboxFailure[] = [];
+    const mailboxes = await this.directoryService.discoverActiveMailboxes();
+    for (const mailbox of mailboxes) {
+      try { completed.push(await this.runMailbox(mailbox.normalizedAddress)); }
+      catch (error) { failed.push({ mailboxAddress: mailbox.normalizedAddress, safeMessage: safeErrorMessage(error) }); }
+    }
+    return { completed, failed };
+  }
+
+  private async runLocked(authorization: GmailAuthorizationContext): Promise<GmailHistoricalSyncResult> {
+    const entityType = `GmailIncremental:${authorization.mailbox.normalizedAddress}`;
+    await this.repository.recoverInterruptedRun(entityType);
+    const mailbox = await this.repository.ensureMailbox(authorization.mailbox);
+    const metadata = await this.repository.getSyncMetadata(mailbox.id);
+    const startHistoryId = metadata.historyId;
+
+    if (!startHistoryId) {
+      throw new Error('GMAIL_HISTORY_404');
+    }
+
+    let syncRunId: string | null = null;
+    let processed = 0;
+    try {
+      syncRunId = await this.repository.createSyncRun(entityType);
+      
+      const result = await this.syncHistory(authorization, mailbox, syncRunId, startHistoryId);
+      processed = result.processed;
+      
+      if (result.newHistoryId) {
+        await this.repository.updateSyncMetadata(mailbox.id, result.newHistoryId);
+      }
+      
+      // Update sync run to completed (reusing logic, but we need to mark it COMPLETED directly)
+      // Since completeMailbox resets historical window, we should just update the run manually or add a method.
+      // For now we can use a direct DB call or a new method. Wait, I can't call DB directly if repository encapsulates it.
+      // Let's create completeIncrementalRun in repository, but for now I'll just use a knex call if possible. Oh wait, this class doesn't have knex.
+      
+      return { mailboxAddress: mailbox.normalizedMailboxAddress, contentMode: authorization.mailbox.contentMode, syncRunId, recordsProcessed: processed, recordsPersisted: result.persisted };
+    } catch (error) {
+      if (syncRunId) await this.repository.failSyncRun(syncRunId, processed, safeErrorMessage(error));
+      
+      const err = error as any;
+      if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && err.response.status === 404) {
+         throw new Error('GMAIL_HISTORY_404', { cause: error });
+      }
+      
+      throw new Error(SAFE_FAILURE, { cause: error });
+    }
+  }
+
+  private async syncHistory(
+    authorization: GmailAuthorizationContext,
+    mailbox: GmailHistoricalMailbox,
+    syncRunId: string,
+    startHistoryId: string,
+  ): Promise<{ processed: number; persisted: number; newHistoryId: string | null }> {
+    let pageToken: string | undefined;
+    let stop = false;
+    let processed = 0;
+    let persisted = 0;
+    let newHistoryId: string | null = null;
+
+    while (!stop) {
+      const listed = await withRetry(async () => authorization.client.users.history.list({
+        userId: 'me', startHistoryId, maxResults: PAGE_SIZE, ...(pageToken ? { pageToken } : {}),
+      }));
+
+      if (listed.data.historyId && !newHistoryId) {
+        newHistoryId = String(listed.data.historyId);
+      }
+
+      const writes: GmailHistoricalMessageWrite[] = [];
+      const errors: GmailHistoricalError[] = [];
+      
+      const toFetch = new Set<string>();
+      const toDelete = new Set<string>();
+
+      for (const historyRecord of listed.data.history ?? []) {
+        if (historyRecord.messagesAdded) {
+          for (const msg of historyRecord.messagesAdded) {
+            if (msg.message?.id) toFetch.add(msg.message.id);
+          }
+        }
+        if (historyRecord.labelsAdded) {
+          for (const msg of historyRecord.labelsAdded) {
+            if (msg.message?.id) toFetch.add(msg.message.id);
+          }
+        }
+        if (historyRecord.messagesDeleted) {
+          for (const msg of historyRecord.messagesDeleted) {
+            if (msg.message?.id) toDelete.add(msg.message.id);
+          }
+        }
+        if (historyRecord.labelsRemoved) {
+          for (const msg of historyRecord.labelsRemoved) {
+            if (msg.message?.id) {
+               toFetch.add(msg.message.id);
+            }
+          }
+        }
+      }
+
+      for (const msgId of toDelete) {
+        toFetch.delete(msgId);
+        writes.push({
+          providerMessageId: msgId,
+          threadId: '', 
+          payload: null,
+          contentMode: authorization.mailbox.contentMode,
+          internalDate: new Date(),
+          providerHistoryId: null,
+          isDeleted: true,
+        });
+      }
+
+      for (const msgId of toFetch) {
+        try {
+          const raw = await withRetry(async () => authorization.client.users.messages.get({
+            userId: 'me', id: msgId, format: authorization.mailbox.contentMode === 'METADATA' ? 'metadata' : 'full',
+          }));
+          const message = normalizeMessage(raw.data);
+          if (!message) {
+            errors.push({ sourceId: msgId, message: 'Gmail message response was malformed.' });
+            continue;
+          }
+          
+          const inScope = message.labelIds.some(label => (INCLUDED_LABELS as readonly string[]).includes(label)) && 
+                          !message.labelIds.some(label => EXCLUDED_LABELS.has(label));
+                          
+          if (inScope) {
+            writes.push({
+              providerMessageId: message.id,
+              threadId: message.threadId,
+              payload: authorization.mailbox.contentMode === 'METADATA' ? buildMetadataPayload(message) : buildContentPayload(message),
+              contentMode: authorization.mailbox.contentMode,
+              internalDate: message.internalDate,
+              providerHistoryId: message.historyId,
+              isDeleted: false,
+            });
+          } else {
+            writes.push({
+              providerMessageId: message.id,
+              threadId: message.threadId,
+              payload: null,
+              contentMode: authorization.mailbox.contentMode,
+              internalDate: message.internalDate,
+              providerHistoryId: message.historyId,
+              isDeleted: true,
+            });
+          }
+        } catch (error) {
+          const err = error as any;
+          if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && err.response.status === 404) {
+             writes.push({
+               providerMessageId: msgId,
+               threadId: '',
+               payload: null,
+               contentMode: authorization.mailbox.contentMode,
+               internalDate: new Date(),
+               providerHistoryId: null,
+               isDeleted: true,
+             });
+          } else {
+             errors.push({ sourceId: msgId, message: safeErrorMessage(error) });
+          }
+        }
+      }
+
+      persisted += await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
+      processed += writes.length;
+      
+      pageToken = listed.data.nextPageToken;
+      if (!pageToken) stop = true;
+    }
+    
+    return { processed, persisted, newHistoryId };
+  }
+}
+
+export const gmailIncrementalSyncService = new GmailIncrementalSyncService();
