@@ -9,11 +9,11 @@ import { gmailHistoricalRepository, type GmailHistoricalError, type GmailHistori
 import { isEligibleGmailSynchronizationMailbox, googleWorkspaceDirectoryService } from './workspace-directory.service';
 import type { GmailContentMode } from './types';
 
-const INCLUDED_LABELS = ['INBOX', 'SENT'] as const;
-const EXCLUDED_LABELS = new Set(['DRAFT', 'SPAM', 'TRASH']);
-const MAX_ATTEMPTS = 3;
-const PAGE_SIZE = 100;
-const SAFE_FAILURE = 'Google Workspace Gmail historical synchronization failed.';
+export const INCLUDED_LABELS = ['INBOX', 'SENT'] as const;
+export const EXCLUDED_LABELS = new Set(['DRAFT', 'SPAM', 'TRASH']);
+export const MAX_ATTEMPTS = 3;
+export const PAGE_SIZE = 100;
+export const SAFE_FAILURE = 'Google Workspace Gmail historical synchronization failed.';
 const ALLOWED_HEADERS = new Set(['from', 'to', 'cc', 'bcc', 'reply-to', 'date']);
 
 export interface GmailHistoricalSyncResult {
@@ -34,7 +34,7 @@ export interface GmailHistoricalAllResult {
   failed: GmailHistoricalMailboxFailure[];
 }
 
-interface GmailMessageEnvelope {
+export interface GmailMessageEnvelope {
   id: string;
   threadId: string;
   labelIds: string[];
@@ -45,7 +45,7 @@ interface GmailMessageEnvelope {
 }
 
 interface SanitizedHeaders { name: string; value: string; }
-interface AttachmentMetadata { filename: string; mimeType: string | null; size: number | null; attachmentId: string | null; }
+interface AttachmentMetadata { filename: string; mimeType: string | null; size: number | null; }
 interface ContentPayload { plainText: string[]; html: string[]; attachments: AttachmentMetadata[]; }
 
 type GmailAuthorizationService = Pick<typeof googleWorkspaceAuthService, 'getGmailAuthorization'>;
@@ -89,7 +89,7 @@ export const safeErrorMessage = (error: unknown): string => {
   return SAFE_FAILURE;
 };
 
-const isRetryable = (error: unknown): boolean => {
+export const isRetryable = (error: unknown): boolean => {
   if (error instanceof TypeError) return true;
   if (typeof error !== 'object' || error === null) return false;
   const status = (error as { response?: { status?: unknown } }).response?.status;
@@ -129,7 +129,7 @@ const collectContent = (node: Record<string, unknown>, output: ContentPayload): 
   const attachmentId = body && typeof body.attachmentId === 'string' ? body.attachmentId : null;
   const size = body && typeof body.size === 'number' && Number.isFinite(body.size) ? body.size : null;
   if (filename !== '' || attachmentId !== null) {
-    output.attachments.push({ filename, mimeType, size, attachmentId });
+    output.attachments.push({ filename, mimeType, size });
     return;
   }
   if (body && typeof body.data === 'string') {
@@ -142,11 +142,11 @@ const collectContent = (node: Record<string, unknown>, output: ContentPayload): 
   }
 };
 
-const hasLockedAuthorization = (authorization: GmailAuthorizationContext): boolean => {
+export const hasLockedAuthorization = (authorization: GmailAuthorizationContext): boolean => {
   const expectedScope = authorization.mailbox.contentMode === 'CONTENT' ? GMAIL_READONLY_SCOPE : GMAIL_METADATA_SCOPE;
   return authorization.subject === authorization.mailbox.normalizedAddress && authorization.scope === expectedScope;
 };
-const normalizeMessage = (input: unknown): GmailMessageEnvelope | null => {
+export const normalizeMessage = (input: unknown): GmailMessageEnvelope | null => {
   if (!isRecord(input)) return null;
   const id = readString(input, 'id');
   const threadId = readString(input, 'threadId');
@@ -163,7 +163,7 @@ const normalizeMessage = (input: unknown): GmailMessageEnvelope | null => {
   };
 };
 
-const buildMetadataPayload = (message: GmailMessageEnvelope): Record<string, unknown> => ({
+export const buildMetadataPayload = (message: GmailMessageEnvelope): Record<string, unknown> => ({
   id: message.id,
   threadId: message.threadId,
   labelIds: message.labelIds,
@@ -173,7 +173,7 @@ const buildMetadataPayload = (message: GmailMessageEnvelope): Record<string, unk
   headers: readHeaders(message.payload),
 });
 
-const buildContentPayload = (message: GmailMessageEnvelope): Record<string, unknown> => {
+export const buildContentPayload = (message: GmailMessageEnvelope): Record<string, unknown> => {
   const content: ContentPayload = { plainText: [], html: [], attachments: [] };
   if (message.payload) collectContent(message.payload, content);
   
@@ -193,7 +193,6 @@ export class GmailHistoricalSyncService {
     private readonly repository: GmailHistoricalRepository = gmailHistoricalRepository,
     private readonly historicalDays: number = env.GOOGLE_GMAIL_HISTORICAL_DAYS,
     private readonly now: () => number = Date.now,
-    private readonly wait: (milliseconds: number) => Promise<void> = async (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   ) {}
 
   public async runMailbox(mailboxAddress: string): Promise<GmailHistoricalSyncResult> {
@@ -233,7 +232,9 @@ export class GmailHistoricalSyncService {
         processed += result.processed;
         persisted += result.persisted;
       }
-      await this.repository.completeMailbox(mailbox, syncRunId, processed, this.historicalDays);
+      const profile = await withRetry(async () => authorization.client.users.getProfile({ userId: 'me' }));
+      const historyId = profile.data.historyId ? String(profile.data.historyId) : null;
+      await this.repository.completeMailbox(mailbox, syncRunId, processed, this.historicalDays, historyId);
       return { mailboxAddress: mailbox.normalizedMailboxAddress, contentMode: authorization.mailbox.contentMode, syncRunId, recordsProcessed: processed, recordsPersisted: persisted };
     } catch (error) {
       if (syncRunId) await this.repository.failSyncRun(syncRunId, processed, safeErrorMessage(error));
@@ -254,7 +255,7 @@ export class GmailHistoricalSyncService {
     let processed = 0;
     let persisted = 0;
     while (!stop) {
-      const listed = await this.withRetry(async () => authorization.client.users.messages.list({
+      const listed = await withRetry(async () => authorization.client.users.messages.list({
         userId: 'me', maxResults: PAGE_SIZE, includeSpamTrash: false, labelIds: [label], ...(pageToken ? { pageToken } : {}),
       }));
       const writes: GmailHistoricalMessageWrite[] = [];
@@ -267,7 +268,7 @@ export class GmailHistoricalSyncService {
         const listedMessageId = listedMessage.id;
         if (seenMessageIds.has(listedMessageId)) continue;
         seenMessageIds.add(listedMessageId);
-        const raw = await this.withRetry(async () => authorization.client.users.messages.get({
+        const raw = await withRetry(async () => authorization.client.users.messages.get({
           userId: 'me', id: listedMessageId, format: authorization.mailbox.contentMode === 'METADATA' ? 'metadata' : 'full',
         }));
         const message = normalizeMessage(raw.data);
@@ -296,19 +297,19 @@ export class GmailHistoricalSyncService {
     }
     return { processed, persisted };
   }
-
-  private async withRetry<T>(request: () => Promise<T>): Promise<T> {
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-      try { return await request(); }
-      catch (error) {
-        lastError = error;
-        if (attempt === MAX_ATTEMPTS || !isRetryable(error)) break;
-        await this.wait(100 * (2 ** (attempt - 1)));
-      }
-    }
-    throw lastError instanceof Error ? lastError : new Error(SAFE_FAILURE);
-  }
 }
+
+export const withRetry = async <T>(request: () => Promise<T>, wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))): Promise<T> => {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try { return await request(); }
+    catch (error) {
+      lastError = error;
+      if (attempt === MAX_ATTEMPTS || !isRetryable(error)) break;
+      await wait(100 * (2 ** (attempt - 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(SAFE_FAILURE);
+};
 
 export const gmailHistoricalSyncService = new GmailHistoricalSyncService();

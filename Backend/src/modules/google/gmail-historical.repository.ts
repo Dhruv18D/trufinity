@@ -12,10 +12,11 @@ export interface GmailHistoricalMailbox {
 export interface GmailHistoricalMessageWrite {
   providerMessageId: string;
   threadId: string;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | null;
   contentMode: 'METADATA' | 'CONTENT';
   internalDate: Date;
   providerHistoryId: string | null;
+  isDeleted?: boolean;
 }
 
 export interface GmailHistoricalError {
@@ -29,8 +30,10 @@ export interface GmailHistoricalRepository {
   ensureMailbox(mailbox: GmailMailboxConfig): Promise<GmailHistoricalMailbox>;
   createSyncRun(entityType: string): Promise<string>;
   commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number>;
-  completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number): Promise<void>;
+  completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number, historyId: string | null): Promise<void>;
   failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void>;
+  getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null }>;
+  updateSyncMetadata(mailboxId: string, historyId: string): Promise<void>;
 }
 
 const SOURCE_SYSTEM = 'GoogleWorkspace';
@@ -105,8 +108,8 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
     let persisted = 0;
     await this.database.transaction(async (trx) => {
       for (const message of messages) {
-        const current = await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).first('payload');
-        if (current && stableJson(current.payload) === stableJson(message.payload)) continue;
+        const current = await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).first('payload', 'is_deleted');
+        if (current && current.is_deleted === (message.isDeleted ?? false) && stableJson(current.payload) === stableJson(message.payload)) continue;
         await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).update({ is_latest: false });
         await trx('raw_gmail_messages').insert({
           mailbox_id: mailbox.id,
@@ -117,7 +120,7 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
           content_mode: message.contentMode,
           internal_date: message.internalDate,
           provider_history_id: message.providerHistoryId,
-          is_deleted: false,
+          is_deleted: message.isDeleted ?? false,
           is_latest: true,
           sync_run_id: syncRunId,
         });
@@ -135,7 +138,7 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
     return persisted;
   }
 
-  public async completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number): Promise<void> {
+  public async completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number, historyId: string | null): Promise<void> {
     await this.database.transaction(async (trx) => {
       const state = {
         sync_type: 'HISTORICAL',
@@ -145,11 +148,15 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
       await trx('raw_gmail_sync_metadata').insert({
         mailbox_id: mailbox.id,
         historical_page_token: null,
+        history_id: historyId,
+        last_successful_history_id: historyId,
         state,
         last_successful_sync_at: trx.fn.now(),
         updated_at: trx.fn.now(),
       }).onConflict('mailbox_id').merge({
         historical_page_token: null,
+        history_id: historyId,
+        last_successful_history_id: historyId,
         state,
         last_successful_sync_at: trx.fn.now(),
         updated_at: trx.fn.now(),
@@ -163,6 +170,24 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
   public async failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void> {
     await this.database('sync_runs').where({ id: syncRunId }).update({
       status: 'FAILED', records_processed: recordsProcessed, error_message: safeMessage, completed_at: this.database.fn.now(),
+    });
+  }
+
+  public async getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null }> {
+    const row = await this.database('raw_gmail_sync_metadata').where({ mailbox_id: mailboxId }).first('history_id', 'last_successful_history_id');
+    if (!row) return { historyId: null, lastSuccessfulHistoryId: null };
+    return {
+      historyId: typeof row.history_id === 'string' ? row.history_id : null,
+      lastSuccessfulHistoryId: typeof row.last_successful_history_id === 'string' ? row.last_successful_history_id : null,
+    };
+  }
+
+  public async updateSyncMetadata(mailboxId: string, historyId: string): Promise<void> {
+    await this.database('raw_gmail_sync_metadata').where({ mailbox_id: mailboxId }).update({
+      history_id: historyId,
+      last_successful_history_id: historyId,
+      last_successful_sync_at: this.database.fn.now(),
+      updated_at: this.database.fn.now(),
     });
   }
 }
