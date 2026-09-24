@@ -35,6 +35,17 @@ export type GmailMessageFormat = 'metadata' | 'full';
 
 export interface GoogleGmailClient {
   users: {
+    getProfile(params: {
+      userId: 'me';
+    }): Promise<{ data: { emailAddress?: string; messagesTotal?: number; threadsTotal?: number; historyId?: string } }>;
+    history: {
+      list(params: {
+        userId: 'me';
+        startHistoryId: string;
+        maxResults?: number;
+        pageToken?: string;
+      }): Promise<{ data: { history?: { id?: string; messagesAdded?: { message?: { id?: string; threadId?: string } }[]; messagesDeleted?: { message?: { id?: string; threadId?: string } }[]; labelsAdded?: { message?: { id?: string; threadId?: string }; labelIds?: string[] }[]; labelsRemoved?: { message?: { id?: string; threadId?: string }; labelIds?: string[] }[] }[]; historyId?: string; nextPageToken?: string } }>;
+    };
     messages: {
       list(params: {
         userId: 'me';
