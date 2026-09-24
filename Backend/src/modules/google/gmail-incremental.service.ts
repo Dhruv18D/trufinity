@@ -38,6 +38,7 @@ export class GmailIncrementalSyncService {
   ) {}
 
   public async runMailbox(mailboxAddress: string): Promise<GmailHistoricalSyncResult> {
+    (global as any).__GMAIL_SYNC_STAGE = 'incremental authorization/discovery';
     const mailboxes = await this.directoryService.discoverActiveMailboxes();
     const isDiscovered = mailboxes.some((m) => m.normalizedAddress === mailboxAddress.toLowerCase().trim());
     if (!isDiscovered) throw new Error('Mailbox is not eligible, suspended, archived, or not found in Google Workspace directory.');
@@ -79,6 +80,8 @@ export class GmailIncrementalSyncService {
     const entityType = `GmailIncremental:${authorization.mailbox.normalizedAddress}`;
     await this.repository.recoverInterruptedRun(entityType);
     const mailbox = await this.repository.ensureMailbox(authorization.mailbox);
+    
+    (global as any).__GMAIL_SYNC_STAGE = 'initial-checkpoint detection';
     const metadata = await this.repository.getSyncMetadata(mailbox.id);
     const startHistoryId = metadata.historyId;
 
