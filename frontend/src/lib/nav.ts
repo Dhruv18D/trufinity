@@ -14,4 +14,5 @@ export const navItems: NavItem[] = [
   { href: "/marketing", label: "Marketing", icon: "megaphone" },
   { href: "/watchlist", label: "Watch List & Opportunities", icon: "eye" },
   { href: "/closed-loop", label: "Closed Loop", icon: "check-circle" },
+  { href: "/data-quality", label: "Data Quality", icon: "wrench" },
 ];

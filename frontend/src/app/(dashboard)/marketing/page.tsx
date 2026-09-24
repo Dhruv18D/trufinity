@@ -2,7 +2,13 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
 import { Pill } from "@/components/ui/Badge";
-import { marketingMetrics, recentReviews } from "@/lib/mock-data";
+import { PendingState } from "@/components/ui/States";
+import { sectionReady } from "@/lib/sections";
+import type { MarketingMetric, ReviewItem } from "@/lib/types";
+
+// TODO: replace with marketing API data once available.
+const marketingMetrics: MarketingMetric[] = [];
+const recentReviews: ReviewItem[] = [];
 
 const trendStyles = { up: "text-success", down: "text-danger", flat: "text-foreground/50" } as const;
 const trendIcon = { up: "arrow-up", down: "arrow-down", flat: "minus" } as const;
@@ -25,6 +31,10 @@ export default function MarketingPage() {
         description="Google Ads performance and online reputation across review platforms."
       />
 
+      {!sectionReady.marketing ? (
+        <PendingState />
+      ) : (
+      <>
       <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
         {marketingMetrics.map((m) => (
           <Card key={m.id} className="flex flex-col gap-2">
@@ -59,6 +69,8 @@ export default function MarketingPage() {
           ))}
         </div>
       </Card>
+      </>
+      )}
     </div>
   );
 }

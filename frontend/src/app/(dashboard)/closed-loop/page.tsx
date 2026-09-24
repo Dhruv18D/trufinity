@@ -2,7 +2,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { closedLoop } from "@/lib/mock-data";
+import { PendingState } from "@/components/ui/States";
+import { sectionReady } from "@/lib/sections";
+import type { ClosedLoopItem } from "@/lib/types";
+
+// TODO: replace with closed-loop API data once available.
+const closedLoop: ClosedLoopItem[] = [];
 
 const typeMeta = {
   escalation: { label: "Escalation", icon: "alert-circle" },
@@ -18,6 +23,9 @@ export default function ClosedLoopPage() {
         description="A record of resolved escalations, red flags, and opportunities — and how they were handled."
       />
 
+      {!sectionReady.closedLoop ? (
+        <PendingState />
+      ) : (
       <Card padded={false}>
         <ol className="divide-y divide-border-subtle">
           {closedLoop.map((item) => {
@@ -46,6 +54,7 @@ export default function ClosedLoopPage() {
           })}
         </ol>
       </Card>
+      )}
     </div>
   );
 }
