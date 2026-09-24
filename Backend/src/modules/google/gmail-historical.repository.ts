@@ -173,12 +173,13 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
     });
   }
 
-  public async getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null }> {
-    const row = await this.database('raw_gmail_sync_metadata').where({ mailbox_id: mailboxId }).first('history_id', 'last_successful_history_id');
-    if (!row) return { historyId: null, lastSuccessfulHistoryId: null };
+  public async getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null; lastSuccessfulSyncAt: Date | null }> {
+    const row = await this.database('raw_gmail_sync_metadata').where({ mailbox_id: mailboxId }).first('history_id', 'last_successful_history_id', 'last_successful_sync_at');
+    if (!row) return { historyId: null, lastSuccessfulHistoryId: null, lastSuccessfulSyncAt: null };
     return {
       historyId: typeof row.history_id === 'string' ? row.history_id : null,
       lastSuccessfulHistoryId: typeof row.last_successful_history_id === 'string' ? row.last_successful_history_id : null,
+      lastSuccessfulSyncAt: row.last_successful_sync_at instanceof Date ? row.last_successful_sync_at : null,
     };
   }
 

@@ -192,10 +192,28 @@ describe('GmailIncrementalSyncService', () => {
     expect(gmailHistoricalRepository.updateSyncMetadata).not.toHaveBeenCalled();
   });
 
-  it('11. expired historyId 404 recovery', async () => {
+  it('11a. null historyId + successful prior historical sync does NOT trigger 365-day historical fallback', async () => {
+    (gmailHistoricalRepository.getSyncMetadata as any).mockResolvedValue({
+      historyId: null,
+      lastSuccessfulHistoryId: null,
+      lastSuccessfulSyncAt: new Date(1700000000000)
+    });
+    (gmailHistoricalSyncService.runMailbox as any).mockResolvedValue({ recordsProcessed: 0, recordsPersisted: 0 } as any);
+    await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+    // Should call runMailbox with the explicit cutoff date (timestamp 1700000000000)
+    expect(gmailHistoricalSyncService.runMailbox).toHaveBeenCalledWith(mockMailboxAddress, new Date(1700000000000));
+  });
+
+  it('11b. existing expired historyId still follows correct recovery path', async () => {
+    (gmailHistoricalRepository.getSyncMetadata as any).mockResolvedValue({
+      historyId: mockHistoryId,
+      lastSuccessfulHistoryId: mockHistoryId,
+      lastSuccessfulSyncAt: new Date(1700000000000)
+    });
     mockHistoryList.mockRejectedValue(Object.assign(new Error('404'), { response: { status: 404 } }));
     (gmailHistoricalSyncService.runMailbox as any).mockResolvedValue({ recordsProcessed: 0, recordsPersisted: 0 } as any);
     await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+    // Should call runMailbox without a cutoff (falls back to 365 days for EXPIRED)
     expect(gmailHistoricalSyncService.runMailbox).toHaveBeenCalledWith(mockMailboxAddress);
   });
 

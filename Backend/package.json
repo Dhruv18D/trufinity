@@ -12,6 +12,7 @@
     "google:discover-mailboxes": "node dist/scripts/google-discover-mailboxes.js",
     "google:gmail-smoke-test": "node dist/scripts/google-gmail-smoke-test.js",
     "google:gmail-historical-sync": "node dist/scripts/google-gmail-historical-sync.js",
+    "google:gmail-incremental-sync": "node dist/scripts/google-gmail-incremental-sync.js",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "jest",
