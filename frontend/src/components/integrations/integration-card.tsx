@@ -1,15 +1,15 @@
 type StatusTone = "connected" | "disconnected" | "warning";
 
 const toneClasses: Record<StatusTone, string> = {
-  connected: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-950/40 dark:text-emerald-300 dark:ring-emerald-400/30",
-  disconnected: "bg-zinc-100 text-zinc-700 ring-zinc-500/20 dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-400/30",
-  warning: "bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-950/40 dark:text-amber-300 dark:ring-amber-400/30",
+  connected: "bg-success-soft text-success ring-success/20",
+  disconnected: "bg-surface-muted text-foreground/60 ring-border-subtle",
+  warning: "bg-warning-soft text-warning ring-warning/20",
 };
 
 const dotClasses: Record<StatusTone, string> = {
-  connected: "bg-emerald-500",
-  disconnected: "bg-zinc-400",
-  warning: "bg-amber-500",
+  connected: "bg-success",
+  disconnected: "bg-foreground/30",
+  warning: "bg-warning",
 };
 
 export function StatusBadge({ tone, label }: { tone: StatusTone; label: string }) {
@@ -34,19 +34,20 @@ export function IntegrationCard({
   badge: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const headingId = `${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-heading`;
   return (
     <section
-      aria-labelledby={`${name}-heading`}
-      className="flex flex-col gap-5 rounded-xl border border-black/[.06] bg-white p-6 dark:border-white/[.08] dark:bg-zinc-950"
+      aria-labelledby={headingId}
+      className="flex flex-col gap-5 rounded-2xl border border-border-subtle bg-surface p-5 shadow-sm sm:p-6"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           {logo}
           <div>
-            <h2 id={`${name}-heading`} className="text-base font-semibold text-black dark:text-zinc-50">
+            <h2 id={headingId} className="text-sm font-semibold text-foreground">
               {name}
             </h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">{description}</p>
+            <p className="mt-0.5 text-xs text-foreground/55">{description}</p>
           </div>
         </div>
         <div className="shrink-0">{badge}</div>
@@ -61,8 +62,8 @@ export function DetailList({ items }: { items: { label: string; value: React.Rea
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
       {items.map((item) => (
         <div key={item.label} className="flex flex-col">
-          <dt className="text-zinc-500 dark:text-zinc-400">{item.label}</dt>
-          <dd className="font-medium break-all text-black dark:text-zinc-50">{item.value}</dd>
+          <dt className="text-foreground/50">{item.label}</dt>
+          <dd className="font-medium break-all text-foreground">{item.value}</dd>
         </div>
       ))}
     </dl>

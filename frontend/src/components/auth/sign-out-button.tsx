@@ -1,6 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { Icon } from "@/components/ui/Icon";
 
 export function SignOutButton() {
   const { pending } = useFormStatus();
@@ -9,9 +10,12 @@ export function SignOutButton() {
       type="submit"
       disabled={pending}
       aria-disabled={pending}
-      className="inline-flex h-8 items-center rounded-lg border border-black/[.12] bg-white px-3 text-sm font-medium text-black transition hover:bg-zinc-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/[.15] dark:bg-zinc-950 dark:text-zinc-50 dark:hover:bg-zinc-900 dark:focus-visible:outline-zinc-300"
+      title="Sign out"
+      className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-foreground/60 transition hover:bg-surface-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-dark disabled:cursor-not-allowed disabled:opacity-60"
     >
-      {pending ? "Signing out…" : "Sign out"}
+      <Icon name="log-out" className="h-4 w-4" />
+      <span className="hidden sm:inline">{pending ? "Signing out…" : "Sign out"}</span>
+      <span className="sr-only sm:hidden">Sign out</span>
     </button>
   );
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState } from "react";
 import { loginAction, type AuthFormState } from "@/app/(auth)/actions";
-import { FormAlert, PasswordField, SubmitButton, TextField } from "./form-controls";
+import { authLinkClassName, FormAlert, PasswordField, SubmitButton, TextField } from "./form-controls";
 
 const initialState: AuthFormState = { status: "idle" };
 
@@ -24,6 +24,8 @@ export function LoginForm({ next, notice }: { next: string; notice?: string | un
         label="Email"
         name="email"
         type="email"
+        icon="mail"
+        placeholder="you@trufinity.ca"
         inputMode="email"
         autoComplete="username"
         autoCapitalize="none"
@@ -44,10 +46,7 @@ export function LoginForm({ next, notice }: { next: string; notice?: string | un
           error={state.fieldErrors?.password}
           disabled={pending}
         />
-        <Link
-          href="/forgot-password"
-          className="self-end text-sm font-medium text-zinc-600 underline-offset-4 hover:text-black hover:underline dark:text-zinc-400 dark:hover:text-zinc-50"
-        >
+        <Link href="/forgot-password" className={`self-end text-sm ${authLinkClassName}`}>
           Forgot password?
         </Link>
       </div>

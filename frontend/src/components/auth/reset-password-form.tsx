@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useActionState, useSyncExternalStore } from "react";
 import { resetPasswordAction, type AuthFormState } from "@/app/(auth)/actions";
 import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@/lib/auth/validation";
-import { FormAlert, PasswordField, SubmitButton } from "./form-controls";
+import { authLinkClassName, FormAlert, PasswordField, SubmitButton } from "./form-controls";
 
 const initialState: AuthFormState = { status: "idle" };
 
@@ -16,15 +16,14 @@ const subscribeToHash = (onChange: () => void) => {
 const readTokenFromHash = () => /^#token=([A-Za-z0-9_-]{43})$/.exec(window.location.hash)?.[1] ?? "";
 const readTokenOnServer = () => null;
 
-const linkClassName =
-  "text-center text-sm font-medium text-zinc-600 underline-offset-4 hover:text-black hover:underline dark:text-zinc-400 dark:hover:text-zinc-50";
+const linkClassName = `text-center text-sm ${authLinkClassName}`;
 
 export function ResetPasswordForm() {
   const token = useSyncExternalStore(subscribeToHash, readTokenFromHash, readTokenOnServer);
   const [state, formAction, pending] = useActionState(resetPasswordAction, initialState);
 
   if (token === null) {
-    return <p className="text-sm text-zinc-600 dark:text-zinc-400">Loading…</p>;
+    return <p className="text-sm text-foreground/60">Loading…</p>;
   }
 
   if (!token) {

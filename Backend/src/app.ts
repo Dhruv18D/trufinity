@@ -6,6 +6,12 @@ import { healthRouter } from './modules/health/health.routes';
 import { quickbooksRouter } from './modules/quickbooks/quickbooks.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
+import { laceRouter } from './modules/lace/lace.routes';
+import { detectRouter } from './modules/detect/detect.routes';
+import { narrateRouter } from './modules/narrate/narrate.routes';
+import { deliverRouter } from './modules/deliver/deliver.routes';
+import { reportingRouter } from './modules/reporting/reporting.routes';
+import { serviceTitanReportingRouter } from './modules/reporting/servicetitan-reporting.routes';
 import { authRouter } from './modules/auth/auth.routes';
 import { integrationsRouter } from './modules/integrations/integrations.routes';
 import { env } from './config/env';
@@ -39,6 +45,12 @@ app.use('/api/auth', authRouter);
 app.use('/api/integrations', integrationsRouter);
 app.use('/api/integrations/servicetitan', serviceTitanRouter);
 app.use('/api/integrations/quickbooks', quickbooksRouter);
+app.use('/api/integrations/lace', laceRouter);
+app.use('/api/detect', detectRouter);
+app.use('/api/narrate', narrateRouter);
+app.use('/api/brief', deliverRouter);
+app.use('/api/reporting/quickbooks', reportingRouter);
+app.use('/api/reporting/servicetitan', serviceTitanReportingRouter);
 
 // Handle 404
 app.use(notFoundHandler);

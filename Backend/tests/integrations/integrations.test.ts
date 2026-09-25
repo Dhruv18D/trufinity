@@ -45,6 +45,8 @@ describe('Integrations routes', () => {
       getAuthorizationUrl: () => 'unused',
     };
     const serviceTitan = { getAccessToken: jest.fn(async () => 'token') };
+    // Pin ServiceTitan to "unconfigured" so the result doesn't depend on the local .env.
+    jest.replaceProperty(env, 'SERVICETITAN_CLIENT_ID', '');
     const app = buildApp(new IntegrationsService(qbo, serviceTitan, fakeDatabase('Trufinity Plumbing')));
 
     const res = await request(app).get('/api/integrations/status').set('Authorization', `Bearer ${VALID_TOKEN}`);
@@ -55,9 +57,25 @@ describe('Integrations routes', () => {
       refreshTokenExpiresAt: new Date(expiry).toISOString(),
     });
     expect(JSON.stringify(res.body)).not.toMatch(/access_?token|refresh_?token"/i);
-    // ServiceTitan credentials are unset in the test environment, so no token request is attempted.
+    // With ServiceTitan credentials unset, no token request is attempted.
     expect(res.body.servicetitan).toMatchObject({ configured: false, connected: false, connectUrl: env.SERVICETITAN_CONNECT_URL });
     expect(serviceTitan.getAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('reports ServiceTitan as connected only when configured credentials mint a token', async () => {
+    for (const key of ['SERVICETITAN_CLIENT_ID', 'SERVICETITAN_CLIENT_SECRET', 'SERVICETITAN_APP_KEY',
+      'SERVICETITAN_AUTH_URL', 'SERVICETITAN_BASE_URL', 'SERVICETITAN_TENANT_ID'] as const) {
+      jest.replaceProperty(env, key, 'configured-value');
+    }
+    const qbo = { isConfigured: () => false, getConnection: async () => null, getAuthorizationUrl: () => 'unused' };
+
+    const working = await request(buildApp(new IntegrationsService(qbo, { getAccessToken: async () => 'token' })))
+      .get('/api/integrations/status').set('Authorization', `Bearer ${VALID_TOKEN}`);
+    expect(working.body.servicetitan).toMatchObject({ configured: true, connected: true });
+
+    const rejected = await request(buildApp(new IntegrationsService(qbo, { getAccessToken: async () => { throw new Error('401'); } })))
+      .get('/api/integrations/status').set('Authorization', `Bearer ${VALID_TOKEN}`);
+    expect(rejected.body.servicetitan).toMatchObject({ configured: true, connected: false });
   });
 
   it('treats an expired refresh token as disconnected', async () => {

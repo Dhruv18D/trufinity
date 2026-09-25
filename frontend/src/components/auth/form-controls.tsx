@@ -1,18 +1,16 @@
 "use client";
 
 import { useId, useState, type InputHTMLAttributes } from "react";
+import { Icon } from "@/components/ui/Icon";
 
-const inputClassName =
-  "block w-full rounded-lg border bg-white px-3 py-2 text-sm text-black shadow-xs outline-none transition " +
-  "placeholder:text-zinc-400 focus:border-zinc-900 focus:ring-2 focus:ring-zinc-900/10 " +
-  "disabled:cursor-not-allowed disabled:opacity-60 " +
-  "dark:bg-zinc-950 dark:text-zinc-50 dark:focus:border-zinc-300 dark:focus:ring-zinc-300/10";
+type IconName = Parameters<typeof Icon>[0]["name"];
 
 interface FieldProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "id"> {
   label: string;
   name: string;
   error?: string | undefined;
   hint?: string;
+  icon?: IconName;
 }
 
 function describedBy(errorId: string, hintId: string, error?: string, hint?: string): string | undefined {
@@ -24,12 +22,12 @@ function FieldMessages({ errorId, hintId, error, hint }: { errorId: string; hint
   return (
     <>
       {hint && !error && (
-        <p id={hintId} className="text-xs text-zinc-500 dark:text-zinc-400">
+        <p id={hintId} className="text-xs text-foreground/50">
           {hint}
         </p>
       )}
       {error && (
-        <p id={errorId} className="text-xs font-medium text-red-600 dark:text-red-400">
+        <p id={errorId} className="text-xs font-medium text-danger">
           {error}
         </p>
       )}
@@ -37,42 +35,57 @@ function FieldMessages({ errorId, hintId, error, hint }: { errorId: string; hint
   );
 }
 
-const borderClass = (error?: string) =>
-  error ? "border-red-500 dark:border-red-500" : "border-black/[.12] dark:border-white/[.15]";
+function InputFrame({ error, icon, children }: { error?: string | undefined; icon?: IconName | undefined; children: React.ReactNode }) {
+  return (
+    <div
+      className={`flex items-center gap-2 rounded-lg border bg-surface px-3 focus-within:border-teal-dark focus-within:ring-2 focus-within:ring-teal/20 ${
+        error ? "border-danger" : "border-border-subtle"
+      }`}
+    >
+      {icon && <Icon name={icon} className="h-4 w-4 shrink-0 text-foreground/40" />}
+      {children}
+    </div>
+  );
+}
 
-export function TextField({ label, name, error, hint, className, ...props }: FieldProps) {
+const inputClassName =
+  "w-full bg-transparent py-2.5 text-sm text-foreground outline-none placeholder:text-foreground/35 disabled:cursor-not-allowed disabled:opacity-60";
+
+export function TextField({ label, name, error, hint, icon, className, ...props }: FieldProps) {
   const id = useId();
   const errorId = `${id}-error`;
   const hintId = `${id}-hint`;
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium text-black dark:text-zinc-50">
+    <div className="flex flex-col gap-1.5 text-sm">
+      <label htmlFor={id} className="font-medium text-foreground/80">
         {label}
       </label>
-      <input
-        id={id}
-        name={name}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy(errorId, hintId, error, hint)}
-        className={`${inputClassName} ${borderClass(error)} ${className ?? ""}`}
-        {...props}
-      />
+      <InputFrame error={error} icon={icon}>
+        <input
+          id={id}
+          name={name}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={describedBy(errorId, hintId, error, hint)}
+          className={`${inputClassName} ${className ?? ""}`}
+          {...props}
+        />
+      </InputFrame>
       <FieldMessages errorId={errorId} hintId={hintId} error={error} hint={hint} />
     </div>
   );
 }
 
-export function PasswordField({ label, name, error, hint, className, ...props }: FieldProps) {
+export function PasswordField({ label, name, error, hint, icon = "lock", className, ...props }: FieldProps) {
   const id = useId();
   const errorId = `${id}-error`;
   const hintId = `${id}-hint`;
   const [visible, setVisible] = useState(false);
   return (
-    <div className="flex flex-col gap-1.5">
-      <label htmlFor={id} className="text-sm font-medium text-black dark:text-zinc-50">
+    <div className="flex flex-col gap-1.5 text-sm">
+      <label htmlFor={id} className="font-medium text-foreground/80">
         {label}
       </label>
-      <div className="relative">
+      <InputFrame error={error} icon={icon}>
         <input
           id={id}
           name={name}
@@ -82,7 +95,7 @@ export function PasswordField({ label, name, error, hint, className, ...props }:
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          className={`${inputClassName} ${borderClass(error)} pr-16 ${className ?? ""}`}
+          className={`${inputClassName} ${className ?? ""}`}
           {...props}
         />
         <button
@@ -90,12 +103,12 @@ export function PasswordField({ label, name, error, hint, className, ...props }:
           onClick={() => setVisible((v) => !v)}
           aria-controls={id}
           aria-pressed={visible}
-          className="absolute inset-y-0 right-0 flex items-center rounded-r-lg px-3 text-xs font-medium text-zinc-600 hover:text-black focus-visible:outline-2 focus-visible:outline-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-50 dark:focus-visible:outline-zinc-300"
+          className="shrink-0 rounded px-1 text-xs font-medium text-foreground/55 hover:text-foreground focus-visible:outline-2 focus-visible:outline-teal-dark"
         >
           {visible ? "Hide" : "Show"}
           <span className="sr-only"> password</span>
         </button>
-      </div>
+      </InputFrame>
       <FieldMessages errorId={errorId} hintId={hintId} error={error} hint={hint} />
     </div>
   );
@@ -104,8 +117,8 @@ export function PasswordField({ label, name, error, hint, className, ...props }:
 export function FormAlert({ tone, children }: { tone: "error" | "success"; children: React.ReactNode }) {
   const toneClass =
     tone === "error"
-      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300"
-      : "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300";
+      ? "border-danger/20 bg-danger-soft text-danger"
+      : "border-success/20 bg-success-soft text-success";
   return (
     <div role={tone === "error" ? "alert" : "status"} className={`rounded-lg border px-3 py-2 text-sm ${toneClass}`}>
       {children}
@@ -119,9 +132,12 @@ export function SubmitButton({ pending, children, pendingLabel }: { pending: boo
       type="submit"
       disabled={pending}
       aria-disabled={pending}
-      className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-black px-4 text-sm font-medium text-white transition hover:bg-zinc-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-zinc-50 dark:text-black dark:hover:bg-zinc-200 dark:focus-visible:outline-zinc-300"
+      className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-dark disabled:cursor-not-allowed disabled:opacity-70"
     >
       {pending ? pendingLabel : children}
+      {!pending && <Icon name="chevron-right" className="h-4 w-4" />}
     </button>
   );
 }
+
+export const authLinkClassName = "font-medium text-teal-dark underline-offset-4 hover:underline";

@@ -6,7 +6,7 @@ import { safeRedirectPath } from "@/lib/auth/validation";
 import { AuthCard } from "../auth-card";
 
 export const metadata: Metadata = {
-  title: "Sign in · Trufinity",
+  title: "Sign in · TruFinity",
   robots: { index: false, follow: false },
 };
 
@@ -25,7 +25,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
         : undefined;
 
   return (
-    <AuthCard title="Sign in" description="Welcome back. Sign in to your Trufinity account.">
+    <AuthCard title="Welcome back" description="Sign in to see today's executive brief and business performance.">
       <LoginForm next={next} notice={notice} />
     </AuthCard>
   );

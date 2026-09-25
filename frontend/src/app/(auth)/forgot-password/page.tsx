@@ -3,7 +3,7 @@ import { ForgotPasswordForm } from "@/components/auth/forgot-password-form";
 import { AuthCard } from "../auth-card";
 
 export const metadata: Metadata = {
-  title: "Forgot password · Trufinity",
+  title: "Forgot password · TruFinity",
   robots: { index: false, follow: false },
 };
 

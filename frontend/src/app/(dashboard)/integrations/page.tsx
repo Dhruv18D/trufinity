@@ -1,17 +1,16 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AccountNav } from "@/components/auth/account-nav";
 import { FormAlert } from "@/components/auth/form-controls";
 import { buttonClassName } from "@/components/integrations/button-styles";
 import { FormButton } from "@/components/integrations/form-button";
 import { DetailList, IntegrationCard, ProviderMark, StatusBadge } from "@/components/integrations/integration-card";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { getSessionToken } from "@/lib/auth/session";
 import { getIntegrationsStatus, type QuickBooksStatus, type ServiceTitanStatus } from "@/lib/integrations";
 import { connectQuickBooksAction, refreshStatusAction } from "./actions";
 
 export const metadata: Metadata = {
-  title: "Integrations · Trufinity",
+  title: "Integrations · TruFinity",
   robots: { index: false, follow: false },
 };
 
@@ -36,49 +35,29 @@ export default async function IntegrationsPage({ searchParams }: PageProps<"/int
   const notice = typeof params.quickbooks === "string" ? quickBooksNotices[params.quickbooks] : undefined;
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-50 dark:bg-black">
-      <header className="w-full border-b border-black/[.06] dark:border-white/[.08]">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-3">
-          <Link href="/" className="text-lg font-semibold tracking-tight text-black dark:text-zinc-50">
-            Trufinity
-          </Link>
-          <div className="flex items-center gap-4">
-            <span className="hidden text-sm font-medium text-zinc-500 md:inline dark:text-zinc-400">
-              Business Intelligence Dashboard
-            </span>
-            <AccountNav />
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-8 px-6 py-12">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-3xl font-semibold tracking-tight text-black dark:text-zinc-50">Integrations</h1>
-            <p className="max-w-2xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-              Connect the business systems Trufinity reads from. Data syncs automatically once a system is connected.
-            </p>
-          </div>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Integrations"
+        description="Connect the business systems TruFinity reads from. Data syncs automatically once a system is connected."
+        action={
           <form action={refreshStatusAction}>
             <FormButton variant="secondary" pendingLabel="Checking…">
               Check status
             </FormButton>
           </form>
+        }
+      />
+
+      {notice && <FormAlert tone={notice.tone}>{notice.message}</FormAlert>}
+
+      {result.kind === "unavailable" ? (
+        <FormAlert tone="error">We couldn&apos;t load integration status right now. Please try again in a moment.</FormAlert>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <QuickBooksCard status={result.status.quickbooks} />
+          <ServiceTitanCard status={result.status.servicetitan} />
         </div>
-
-        {notice && <FormAlert tone={notice.tone}>{notice.message}</FormAlert>}
-
-        {result.kind === "unavailable" ? (
-          <FormAlert tone="error">
-            We couldn&apos;t load integration status right now. Please try again in a moment.
-          </FormAlert>
-        ) : (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <QuickBooksCard status={result.status.quickbooks} />
-            <ServiceTitanCard status={result.status.servicetitan} />
-          </div>
-        )}
-      </main>
+      )}
     </div>
   );
 }
@@ -111,7 +90,7 @@ function QuickBooksCard({ status }: { status: QuickBooksStatus }) {
           ]}
         />
       ) : (
-        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        <p className="text-sm leading-6 text-foreground/60">
           You&apos;ll be taken to Intuit to sign in and choose the QuickBooks company to connect, then brought back here.
         </p>
       )}
@@ -123,7 +102,7 @@ function QuickBooksCard({ status }: { status: QuickBooksStatus }) {
           </FormButton>
         </form>
         {!status.configured && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
+          <p className="text-xs text-warning">
             QuickBooks app credentials aren&apos;t configured on the server yet (QBO_CLIENT_ID, QBO_CLIENT_SECRET,
             QBO_AUTH_URL, QBO_TOKEN_URL, QBO_REDIRECT_URI).
           </p>
@@ -152,19 +131,19 @@ function ServiceTitanCard({ status }: { status: ServiceTitanStatus }) {
       {status.tenantId && <DetailList items={[{ label: "Tenant ID", value: status.tenantId }]} />}
 
       {!status.connected && (
-        <div className="flex flex-col gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+        <div className="flex flex-col gap-2 text-sm leading-6 text-foreground/60">
           <p>ServiceTitan access is granted by a tenant admin inside ServiceTitan:</p>
           <ol className="list-decimal space-y-1 pl-5">
             <li>
-              Open ServiceTitan and go to <span className="font-medium text-black dark:text-zinc-50">Settings → Integrations → API Application Access</span>.
+              Open ServiceTitan and go to <span className="font-medium text-foreground">Settings → Integrations → API Application Access</span>.
             </li>
             <li>
-              Click <span className="font-medium text-black dark:text-zinc-50">Connect New App</span>, select the Trufinity app, and choose <span className="font-medium text-black dark:text-zinc-50">Allow Access</span>.
+              Click <span className="font-medium text-foreground">Connect New App</span>, select the TruFinity app, and choose <span className="font-medium text-foreground">Allow Access</span>.
             </li>
-            <li>Securely share the generated Client ID and Client Secret with your Trufinity administrator.</li>
+            <li>Securely share the generated Client ID and Client Secret with your TruFinity administrator.</li>
           </ol>
           {status.configured && (
-            <p className="text-amber-700 dark:text-amber-400">
+            <p className="text-warning">
               Credentials are configured but ServiceTitan rejected them. Access may have been revoked; reconnect the app in ServiceTitan.
             </p>
           )}

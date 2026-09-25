@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Trufinity",
+  title: "TruFinity | Business Intelligence Dashboard",
   description:
-    "Trufinity is a business intelligence dashboard presenting business data, daily executive briefs, alerts, and supporting details in a simple, actionable interface.",
+    "TruFinity Plumbing Heating & Cooling business intelligence dashboard — daily executive briefs, alerts, and supporting details in a simple, actionable interface.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
