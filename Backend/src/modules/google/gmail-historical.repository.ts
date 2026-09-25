@@ -47,6 +47,11 @@ const stableJson = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
+// raw_gmail_messages.payload is NOT NULL. Deletion/out-of-scope tombstones carry
+// no Gmail content, so they persist an empty JSON object; is_deleted = true is
+// what distinguishes them from live rows.
+export const TOMBSTONE_PAYLOAD: Record<string, unknown> = Object.freeze({});
+
 export class KnexGmailHistoricalRepository implements GmailHistoricalRepository {
   public constructor(private readonly database: Knex = db) {}
 
@@ -109,19 +114,21 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
     let persisted = 0;
     await this.database.transaction(async (trx) => {
       for (const message of messages) {
+        const isDeleted = message.isDeleted ?? false;
+        const payload = message.payload ?? (isDeleted ? TOMBSTONE_PAYLOAD : null);
         const current = await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).first('payload', 'is_deleted');
-        if (current && current.is_deleted === (message.isDeleted ?? false) && stableJson(current.payload) === stableJson(message.payload)) continue;
+        if (current && current.is_deleted === isDeleted && stableJson(current.payload) === stableJson(payload)) continue;
         await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).update({ is_latest: false });
         await trx('raw_gmail_messages').insert({
           mailbox_id: mailbox.id,
           mailbox_address: mailbox.normalizedMailboxAddress,
           provider_message_id: message.providerMessageId,
           thread_id: message.threadId,
-          payload: message.payload,
+          payload,
           content_mode: message.contentMode,
           internal_date: message.internalDate,
           provider_history_id: message.providerHistoryId,
-          is_deleted: message.isDeleted ?? false,
+          is_deleted: isDeleted,
           is_latest: true,
           sync_run_id: syncRunId,
         });
