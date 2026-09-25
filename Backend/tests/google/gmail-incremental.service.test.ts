@@ -213,6 +213,43 @@ describe('GmailIncrementalSyncService', () => {
     expect(gmailHistoricalRepository.failSyncRun).toHaveBeenCalledWith(mockSyncRunId, 0, expect.any(String));
   });
 
+  describe('10d. diagnostic stage labels and cause preservation', () => {
+    const stage = () => (global as any).__GMAIL_SYNC_STAGE;
+
+    it('labels history.list and preserves the underlying cause', async () => {
+      const cause = Object.assign(new Error('quota'), { response: { status: 429 } });
+      mockHistoryList.mockRejectedValue(cause);
+      const err = await gmailIncrementalSyncService.runMailbox(mockMailboxAddress).catch((e) => e);
+      expect(stage()).toBe('history.list');
+      expect((err as Error).cause).toBe(cause);
+    });
+
+    it('labels sync-run creation', async () => {
+      (gmailHistoricalRepository.createSyncRun as any).mockRejectedValueOnce(new Error('db down'));
+      await expect(gmailIncrementalSyncService.runMailbox(mockMailboxAddress)).rejects.toThrow();
+      expect(stage()).toBe('sync-run creation');
+    });
+
+    it('per-message fetch errors are recorded and the run proceeds to checkpoint completion', async () => {
+      mockHistoryList.mockResolvedValue({ data: { history: [{ messagesAdded: [{ message: { id: 'm1' } }] }], historyId: '1001' } });
+      mockMessagesGet.mockRejectedValue(new Error('boom'));
+      await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+      expect(stage()).toBe('checkpoint completion');
+    });
+
+    it('labels batch commit', async () => {
+      (gmailHistoricalRepository.commitBatch as any).mockRejectedValueOnce(new Error('constraint'));
+      await expect(gmailIncrementalSyncService.runMailbox(mockMailboxAddress)).rejects.toThrow();
+      expect(stage()).toBe('batch commit');
+    });
+
+    it('labels checkpoint completion', async () => {
+      (gmailHistoricalRepository.completeIncrementalRun as any).mockRejectedValueOnce(new Error('x'));
+      await expect(gmailIncrementalSyncService.runMailbox(mockMailboxAddress)).rejects.toThrow();
+      expect(stage()).toBe('checkpoint completion');
+    });
+  });
+
   it('10c. stale/interrupted run recovery is invoked on every run', async () => {
     await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
     expect(gmailHistoricalRepository.recoverInterruptedRun).toHaveBeenCalledWith(`GmailIncremental:${mockMailboxAddress}`);

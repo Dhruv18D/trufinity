@@ -1,5 +1,6 @@
 import { db } from '../database';
 import { gmailIncrementalSyncService } from '../modules/google/gmail-incremental.service';
+import { redact, causeStatus } from './gmail-sync-diagnostics';
 
 function parseOptions(args: string[]): string {
   if (args.length === 1 && args[0].trim() !== '') {
@@ -30,11 +31,17 @@ async function main(): Promise<void> {
     console.error(`Error Name: ${error instanceof Error ? error.name : 'Unknown Error'}`);
     console.error(`HTTP Status: ${statusCode}`);
     
-    let safeMsg = error instanceof Error ? error.message : 'Unknown error';
-    safeMsg = safeMsg.replace(/(eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+)/g, '[REDACTED_JWT]');
-    safeMsg = safeMsg.replace(/([a-zA-Z0-9-_]{40,})/g, '[REDACTED_TOKEN]');
-    safeMsg = safeMsg.replace(/(https?:\/\/[^\s]+)/g, '[REDACTED_URL]');
+    const safeMsg = redact(error instanceof Error ? error.message : 'Unknown error');
     console.error(`Message: ${safeMsg}`);
+
+    // The service wraps failures in a generic SAFE_FAILURE error; surface only
+    // the underlying cause's name, HTTP status and redacted message.
+    const cause = error instanceof Error ? (error as Error & { cause?: unknown }).cause : undefined;
+    if (cause !== undefined && cause !== null) {
+      console.error(`Cause Name: ${cause instanceof Error ? cause.name : typeof cause}`);
+      console.error(`Cause HTTP Status: ${causeStatus(cause)}`);
+      console.error(`Cause Message: ${redact(cause instanceof Error ? cause.message : 'Non-Error cause')}`);
+    }
     
     exitCode = 1;
   } finally {

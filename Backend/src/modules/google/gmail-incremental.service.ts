@@ -95,6 +95,7 @@ export class GmailIncrementalSyncService {
     let syncRunId: string | null = null;
     let processed = 0;
     try {
+      (global as any).__GMAIL_SYNC_STAGE = 'sync-run creation';
       syncRunId = await this.repository.createSyncRun(entityType);
       
       const result = await this.syncHistory(authorization, mailbox, syncRunId, startHistoryId);
@@ -103,6 +104,7 @@ export class GmailIncrementalSyncService {
       // Advance the checkpoint and finalize this sync_runs row as COMPLETED
       // atomically: both happen only after all History API pages have been
       // persisted above, and either both land or neither does.
+      (global as any).__GMAIL_SYNC_STAGE = 'checkpoint completion';
       await this.repository.completeIncrementalRun(mailbox.id, syncRunId, result.newHistoryId, processed);
 
       return { mailboxAddress: mailbox.normalizedMailboxAddress, contentMode: authorization.mailbox.contentMode, syncRunId, recordsProcessed: processed, recordsPersisted: result.persisted };
@@ -131,6 +133,7 @@ export class GmailIncrementalSyncService {
     let newHistoryId: string | null = null;
 
     while (!stop) {
+      (global as any).__GMAIL_SYNC_STAGE = 'history.list';
       const listed = await withRetry(async () => authorization.client.users.history.list({
         userId: 'me', startHistoryId, maxResults: PAGE_SIZE, ...(pageToken ? { pageToken } : {}),
       }));
@@ -183,6 +186,7 @@ export class GmailIncrementalSyncService {
         });
       }
 
+      (global as any).__GMAIL_SYNC_STAGE = 'message fetch';
       for (const msgId of toFetch) {
         try {
           const raw = await withRetry(async () => authorization.client.users.messages.get({
@@ -236,6 +240,7 @@ export class GmailIncrementalSyncService {
         }
       }
 
+      (global as any).__GMAIL_SYNC_STAGE = 'batch commit';
       persisted += await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
       processed += writes.length;
       
