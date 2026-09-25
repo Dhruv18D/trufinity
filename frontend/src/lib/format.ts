@@ -22,3 +22,35 @@ export function formatMoney(value: string | null | undefined): string {
 export function formatCount(value: number | null | undefined): string {
   return value == null ? "—" : countFormatter.format(value);
 }
+
+const dateTimeFormatter = new Intl.DateTimeFormat("en-CA", {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: BUSINESS_TIMEZONE,
+});
+const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  timeZone: BUSINESS_TIMEZONE,
+});
+
+export function formatDateTime(iso: string | null | undefined): string {
+  return iso ? dateTimeFormatter.format(new Date(iso)) : "—";
+}
+
+export function formatDate(iso: string | null | undefined): string {
+  return iso ? dateFormatter.format(new Date(iso)) : "—";
+}
+
+/** "PARTIALLY_PAID" -> "Partially Paid" */
+export function formatEnumLabel(value: string | null | undefined): string {
+  if (!value) return "—";
+  return value
+    .toLowerCase()
+    .split(/[_\s]+/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
