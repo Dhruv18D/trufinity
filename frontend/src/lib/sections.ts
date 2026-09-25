@@ -2,8 +2,9 @@
 export const sectionReady = {
   financialOverview: true,
   dataQuality: true,
+  fieldOperations: true,
   demandAlerts: false,
-  briefHeader: false,
+  briefHeader: true,
   scorecard: false,
   escalations: false,
   redFlags: false,

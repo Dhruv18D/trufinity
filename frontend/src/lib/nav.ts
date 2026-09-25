@@ -7,6 +7,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Main Dashboard", icon: "grid" },
   { href: "/daily-brief", label: "Daily Executive Brief", icon: "sun" },
+  { href: "/field-operations", label: "Field Operations", icon: "building" },
   { href: "/scorecard", label: "Scorecard", icon: "bar-chart" },
   { href: "/escalations", label: "Customer Escalations", icon: "alert-circle" },
   { href: "/red-flags", label: "Red Flags", icon: "flag" },
