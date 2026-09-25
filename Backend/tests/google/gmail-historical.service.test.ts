@@ -73,6 +73,7 @@ function createRepository() {
     failSyncRun: async (syncRunId, recordsProcessed, message) => { failed.push({ syncRunId, recordsProcessed, message }); },
     getSyncMetadata: async () => ({ historyId: null, lastSuccessfulHistoryId: null }),
     updateSyncMetadata: async () => undefined,
+    completeIncrementalRun: async () => undefined,
   };
   return { repository, committed, completed, failed };
 }

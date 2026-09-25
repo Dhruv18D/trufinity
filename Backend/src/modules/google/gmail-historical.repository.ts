@@ -34,6 +34,7 @@ export interface GmailHistoricalRepository {
   failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void>;
   getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null }>;
   updateSyncMetadata(mailboxId: string, historyId: string): Promise<void>;
+  completeIncrementalRun(mailboxId: string, syncRunId: string, newHistoryId: string | null, recordsProcessed: number): Promise<void>;
 }
 
 const SOURCE_SYSTEM = 'GoogleWorkspace';
@@ -189,6 +190,40 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
       last_successful_history_id: historyId,
       last_successful_sync_at: this.database.fn.now(),
       updated_at: this.database.fn.now(),
+    });
+  }
+
+  // Incremental-sync-specific completion. Unlike completeMailbox() (used by the
+  // historical sync), this must NOT touch historical_page_token or state: those
+  // belong exclusively to the historical pagination lifecycle. Checkpoint
+  // advancement and marking the sync_runs row COMPLETED are done in one
+  // transaction so a crash can never leave the checkpoint advanced with the
+  // run still RUNNING, or vice versa. The status='RUNNING' guard scopes the
+  // update to exactly the run this execution created and makes the call
+  // idempotent if it were ever invoked twice for the same run.
+  public async completeIncrementalRun(mailboxId: string, syncRunId: string, newHistoryId: string | null, recordsProcessed: number): Promise<void> {
+    await this.database.transaction(async (trx) => {
+      if (newHistoryId) {
+        await trx('raw_gmail_sync_metadata').where({ mailbox_id: mailboxId }).update({
+          history_id: newHistoryId,
+          last_successful_history_id: newHistoryId,
+          last_successful_sync_at: trx.fn.now(),
+          updated_at: trx.fn.now(),
+        });
+      }
+      const updatedRunCount = await trx('sync_runs').where({ id: syncRunId, status: 'RUNNING' }).update({
+        status: 'COMPLETED',
+        records_processed: recordsProcessed,
+        completed_at: trx.fn.now(),
+      });
+      // Production tracking integrity: a successful completion must correspond to
+      // exactly one RUNNING sync_runs row. If zero rows matched (the row was
+      // already recovered/failed/completed elsewhere, or the id is stale), throwing
+      // here rolls back this entire transaction, including the checkpoint update
+      // above, rather than silently advancing the checkpoint with no completed run.
+      if (updatedRunCount !== 1) {
+        throw new Error(`Google Workspace Gmail incremental sync completion did not match exactly one RUNNING sync_runs row (matched ${updatedRunCount}) for id ${syncRunId}.`);
+      }
     });
   }
 }
