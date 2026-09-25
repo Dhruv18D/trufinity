@@ -99,16 +99,12 @@ export class GmailIncrementalSyncService {
       
       const result = await this.syncHistory(authorization, mailbox, syncRunId, startHistoryId);
       processed = result.processed;
-      
-      if (result.newHistoryId) {
-        await this.repository.updateSyncMetadata(mailbox.id, result.newHistoryId);
-      }
-      
-      // Update sync run to completed (reusing logic, but we need to mark it COMPLETED directly)
-      // Since completeMailbox resets historical window, we should just update the run manually or add a method.
-      // For now we can use a direct DB call or a new method. Wait, I can't call DB directly if repository encapsulates it.
-      // Let's create completeIncrementalRun in repository, but for now I'll just use a knex call if possible. Oh wait, this class doesn't have knex.
-      
+
+      // Advance the checkpoint and finalize this sync_runs row as COMPLETED
+      // atomically: both happen only after all History API pages have been
+      // persisted above, and either both land or neither does.
+      await this.repository.completeIncrementalRun(mailbox.id, syncRunId, result.newHistoryId, processed);
+
       return { mailboxAddress: mailbox.normalizedMailboxAddress, contentMode: authorization.mailbox.contentMode, syncRunId, recordsProcessed: processed, recordsPersisted: result.persisted };
     } catch (error) {
       if (syncRunId) await this.repository.failSyncRun(syncRunId, processed, safeErrorMessage(error));
