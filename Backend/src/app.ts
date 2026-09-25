@@ -11,6 +11,7 @@ import { detectRouter } from './modules/detect/detect.routes';
 import { narrateRouter } from './modules/narrate/narrate.routes';
 import { deliverRouter } from './modules/deliver/deliver.routes';
 import { reportingRouter } from './modules/reporting/reporting.routes';
+import { serviceTitanReportingRouter } from './modules/reporting/servicetitan-reporting.routes';
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use('/api/detect', detectRouter);
 app.use('/api/narrate', narrateRouter);
 app.use('/api/brief', deliverRouter);
 app.use('/api/reporting/quickbooks', reportingRouter);
+app.use('/api/reporting/servicetitan', serviceTitanReportingRouter);
 
 // Handle 404
 app.use(notFoundHandler);
