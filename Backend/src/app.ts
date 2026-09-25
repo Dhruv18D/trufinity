@@ -6,8 +6,14 @@ import { healthRouter } from './modules/health/health.routes';
 import { quickbooksRouter } from './modules/quickbooks/quickbooks.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 import { serviceTitanRouter } from './modules/servicetitan/servicetitan.routes';
+import { authRouter } from './modules/auth/auth.routes';
+import { integrationsRouter } from './modules/integrations/integrations.routes';
+import { env } from './config/env';
 
 const app = express();
+
+// Required behind a reverse proxy (or the frontend BFF) so rate limiting sees real client IPs.
+app.set('trust proxy', env.TRUST_PROXY);
 
 // Middleware
 app.use(helmet());
@@ -28,6 +34,9 @@ app.use(morgan((tokens, req, res) => [
 
 // API Routes
 app.use('/health', healthRouter);
+app.use('/api/auth', authRouter);
+// Must precede the provider routers, whose dev-only guards would otherwise catch these paths.
+app.use('/api/integrations', integrationsRouter);
 app.use('/api/integrations/servicetitan', serviceTitanRouter);
 app.use('/api/integrations/quickbooks', quickbooksRouter);
 

@@ -14,6 +14,23 @@ const envSchema = z.object({
   DB_USER: z.string().min(1),
   DB_PASSWORD: z.string().min(1),
   DB_NAME: z.string().min(1),
+  // Number of reverse-proxy hops to trust for client IPs (0 disables proxy trust).
+  TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
+
+  // Authentication
+  APP_BASE_URL: z.url().default('http://localhost:3001').transform((value) => value.replace(/\/+$/, '')),
+  AUTH_SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(12),
+  AUTH_PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
+  AUTH_MAX_FAILED_LOGINS: z.coerce.number().int().min(3).max(50).default(5),
+  AUTH_LOCKOUT_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
+
+  // Outbound email (SMTP) used for password reset messages
+  SMTP_HOST: z.string().default(''),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  SMTP_SECURE: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  SMTP_USER: z.string().default(''),
+  SMTP_PASSWORD: z.string().default(''),
+  MAIL_FROM: z.string().default('TruFinity <no-reply@trufinity.ca>'),
 
   // QuickBooks Online
   QBO_CLIENT_ID: z.string().default(''),
@@ -49,6 +66,8 @@ const envSchema = z.object({
   SERVICETITAN_AUTH_URL: z.string().default(''),
   SERVICETITAN_BASE_URL: z.string().default(''),
   SERVICETITAN_TENANT_ID: z.string().default(''),
+  // Where tenant admins grant this app access (Settings > Integrations > API Application Access).
+  SERVICETITAN_CONNECT_URL: z.url().default('https://go.servicetitan.com'),
 });
 
 const _env = envSchema.safeParse(process.env);

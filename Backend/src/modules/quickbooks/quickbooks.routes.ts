@@ -56,26 +56,36 @@ router.get('/authorize', (_req, res) => {
   res.redirect(authUrl);
 });
 
+// Flows started from the web app return to its Integrations page instead of receiving JSON.
+const redirectToApp = (res: Response, result: 'connected' | 'denied' | 'failed'): void => {
+  res.redirect(303, `${env.APP_BASE_URL}/integrations?quickbooks=${result}`);
+};
+
 // 2. Handle Intuit Callback, exchange token, and verify connection
 router.get('/callback', async (req, res, next) => {
+  let returnToApp = false;
   try {
     const code = req.query.code as string;
     const realmId = req.query.realmId as string;
     const state = req.query.state as string;
     const error = req.query.error as string;
 
-    if (!state || !qboAuthService.consumeAuthorizationState(state)) {
+    const pendingState = state ? qboAuthService.consumeAuthorizationState(state) : null;
+    if (!pendingState) {
       res.status(400).json({ status: 'error', message: 'Invalid or expired OAuth state.' });
       return;
     }
+    returnToApp = pendingState.returnToApp;
 
     if (error) {
       logger.error('[QuickBooks] Authorization failed');
+      if (returnToApp) { redirectToApp(res, 'denied'); return; }
       res.status(400).json({ status: 'error', message: 'User denied authorization or an error occurred.' });
       return;
     }
 
     if (!code || !realmId) {
+      if (returnToApp) { redirectToApp(res, 'failed'); return; }
       res.status(400).json({ status: 'error', message: 'Missing code or realmId in callback query.' });
       return;
     }
@@ -87,12 +97,18 @@ router.get('/callback', async (req, res, next) => {
     logger.info('[QuickBooks] Verifying connection via CompanyInfo API');
     const companyInfoResponse = await qboApiClient.get<CompanyInfoApiResponse>(`/v3/company/${realmId}/companyinfo/${realmId}`);
 
+    if (returnToApp) { redirectToApp(res, 'connected'); return; }
     res.json({
       status: 'success',
       message: 'QuickBooks OAuth connected successfully!',
       company: companyInfoResponse.CompanyInfo?.CompanyName ?? 'Unknown Company'
     });
   } catch (err) {
+    if (returnToApp) {
+      logger.error('[QuickBooks] OAuth callback failed');
+      redirectToApp(res, 'failed');
+      return;
+    }
     next(err);
   }
 });

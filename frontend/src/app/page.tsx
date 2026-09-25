@@ -1,3 +1,5 @@
+import { AccountNav } from "@/components/auth/account-nav";
+
 const features = [
   {
     title: "Daily Executive Brief",
@@ -19,9 +21,12 @@ export default function Home() {
           <span className="text-lg font-semibold tracking-tight text-black dark:text-zinc-50">
             Trufinity
           </span>
-          <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-            Business Intelligence Dashboard
-          </span>
+          <div className="flex items-center gap-4">
+            <span className="hidden text-sm font-medium text-zinc-500 md:inline dark:text-zinc-400">
+              Business Intelligence Dashboard
+            </span>
+            <AccountNav />
+          </div>
         </div>
       </header>
 

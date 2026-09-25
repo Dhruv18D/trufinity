@@ -94,6 +94,11 @@ export class PostgresQboRefreshLock implements QboRefreshLock {
   }
 }
 
+export interface QboAuthorizationState {
+  expiresAt: number;
+  returnToApp: boolean;
+}
+
 export interface QboTokenSet {
   accessToken: string;
   refreshToken: string;
@@ -122,7 +127,7 @@ class PostgresQboTokenStore implements QboTokenStore {
 
 export class QboAuthService {
   private tokenSet: QboTokenSet | null = null;
-  private readonly pendingStates = new Map<string, number>();
+  private readonly pendingStates = new Map<string, QboAuthorizationState>();
   private refreshInFlight: Promise<void> | null = null;
   public constructor(
     private readonly tokenStore: QboTokenStore = new PostgresQboTokenStore(),
@@ -131,21 +136,34 @@ export class QboAuthService {
   private EXPIRY_BUFFER_MS = 60 * 1000;
   private OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
-  public getAuthorizationUrl(): string {
+  /** `returnToApp` marks flows started from the web app so the callback redirects back to the UI. */
+  public getAuthorizationUrl(options: { returnToApp?: boolean } = {}): string {
     const scope = encodeURIComponent('com.intuit.quickbooks.accounting');
     const redirectUri = encodeURIComponent(env.QBO_REDIRECT_URI);
     const state = randomBytes(32).toString('hex');
     const expiresAt = Date.now() + this.OAUTH_STATE_TTL_MS;
     this.removeExpiredStates();
-    this.pendingStates.set(state, expiresAt);
+    this.pendingStates.set(state, { expiresAt, returnToApp: options.returnToApp ?? false });
     
     return `${env.QBO_AUTH_URL}?client_id=${env.QBO_CLIENT_ID}&response_type=code&scope=${scope}&redirect_uri=${redirectUri}&state=${state}`;
   }
 
-  public consumeAuthorizationState(state: string): boolean {
-    const expiresAt = this.pendingStates.get(state);
+  /** Returns the pending state (single use) or null when it is unknown or expired. */
+  public consumeAuthorizationState(state: string): QboAuthorizationState | null {
+    const pending = this.pendingStates.get(state);
     this.pendingStates.delete(state);
-    return typeof expiresAt === 'number' && expiresAt > Date.now();
+    return pending && pending.expiresAt > Date.now() ? pending : null;
+  }
+
+  public isConfigured(): boolean {
+    return [env.QBO_CLIENT_ID, env.QBO_CLIENT_SECRET, env.QBO_AUTH_URL, env.QBO_TOKEN_URL, env.QBO_REDIRECT_URI]
+      .every((value) => value.length > 0);
+  }
+
+  /** Durable connection details without exposing tokens. */
+  public async getConnection(): Promise<{ realmId: string; refreshTokenExpiry: number } | null> {
+    const stored = await this.tokenStore.load();
+    return stored ? { realmId: stored.realmId, refreshTokenExpiry: stored.refreshTokenExpiry } : null;
   }
 
   public async disconnect(): Promise<boolean> {
@@ -305,8 +323,8 @@ export class QboAuthService {
 
   private removeExpiredStates(): void {
     const now = Date.now();
-    for (const [state, expiresAt] of this.pendingStates.entries()) {
-      if (expiresAt <= now) this.pendingStates.delete(state);
+    for (const [state, pending] of this.pendingStates.entries()) {
+      if (pending.expiresAt <= now) this.pendingStates.delete(state);
     }
   }
 }
