@@ -65,3 +65,49 @@ describe('KnexGmailHistoricalRepository.completeIncrementalRun', () => {
     expect(calls.find((c) => c.table === 'raw_gmail_sync_metadata')).toBeUndefined();
   });
 });
+
+describe('KnexGmailHistoricalRepository.commitBatch tombstones', () => {
+  const mailbox = { id: 'mb-1', mailboxAddress: 's@x.ca', normalizedMailboxAddress: 's@x.ca', contentMode: 'METADATA' } as never;
+
+  function fake(currentRow: Record<string, unknown> | undefined) {
+    const inserts: Record<string, unknown>[] = [];
+    const trx = ((table: string) => ({
+      where: () => ({
+        first: async () => currentRow,
+        update: async () => 1,
+      }),
+      insert: async (row: Record<string, unknown>) => { if (table === 'raw_gmail_messages') inserts.push(row); },
+    })) as unknown as import('knex').Knex.Transaction;
+    const database = { transaction: async (work: (t: unknown) => Promise<void>) => work(trx) } as unknown as import('knex').Knex;
+    return { repository: new KnexGmailHistoricalRepository(database), inserts };
+  }
+
+  const tombstone = { providerMessageId: 'm1', threadId: '', payload: null, contentMode: 'METADATA' as const, internalDate: new Date(), providerHistoryId: null, isDeleted: true };
+
+  it('persists a non-null empty payload with is_deleted=true for a tombstone', async () => {
+    const { repository, inserts } = fake(undefined);
+    expect(await repository.commitBatch(mailbox, 'run-1', [tombstone], [])).toBe(1);
+    expect(inserts[0].payload).toEqual({});
+    expect(inserts[0].payload).not.toBeNull();
+    expect(inserts[0].is_deleted).toBe(true);
+  });
+
+  it('deduplicates a repeated tombstone against an existing deleted row', async () => {
+    const { repository, inserts } = fake({ payload: {}, is_deleted: true });
+    expect(await repository.commitBatch(mailbox, 'run-1', [tombstone], [])).toBe(0);
+    expect(inserts).toHaveLength(0);
+  });
+
+  it('supersedes a live row with a tombstone', async () => {
+    const { repository, inserts } = fake({ payload: { headers: [] }, is_deleted: false });
+    expect(await repository.commitBatch(mailbox, 'run-1', [tombstone], [])).toBe(1);
+    expect(inserts[0].is_deleted).toBe(true);
+  });
+
+  it('leaves live messages unchanged (payload passed through, is_deleted=false)', async () => {
+    const { repository, inserts } = fake(undefined);
+    await repository.commitBatch(mailbox, 'run-1', [{ ...tombstone, threadId: 't', payload: { headers: [] }, isDeleted: false }], []);
+    expect(inserts[0].payload).toEqual({ headers: [] });
+    expect(inserts[0].is_deleted).toBe(false);
+  });
+});
