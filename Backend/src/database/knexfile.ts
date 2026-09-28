@@ -28,7 +28,7 @@ const config: Record<string, Knex.Config> = {
     },
     migrations: {
       directory: '../../migrations',
-      extension: 'js',
+      extension: 'ts',
     },
   },
 };

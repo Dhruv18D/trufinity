@@ -28,6 +28,8 @@ import {
   type GmailHistoricalAllResult,
   gmailHistoricalSyncService,
 } from './gmail-historical.service';
+import { gmailClassificationHook, type GmailClassificationHook } from './gmail-classification.service';
+import type { ClassificationPersistenceInput } from './classification.repository';
 
 export class GmailIncrementalSyncService {
   public constructor(
@@ -35,6 +37,7 @@ export class GmailIncrementalSyncService {
     private readonly directoryService = googleWorkspaceDirectoryService,
     private readonly repository = gmailHistoricalRepository,
     private readonly historicalService = gmailHistoricalSyncService,
+    private readonly classificationHook: GmailClassificationHook = gmailClassificationHook,
   ) {}
 
   public async runMailbox(mailboxAddress: string): Promise<GmailHistoricalSyncResult> {
@@ -143,6 +146,7 @@ export class GmailIncrementalSyncService {
       }
 
       const writes: GmailHistoricalMessageWrite[] = [];
+      const classifications: ClassificationPersistenceInput[] = [];
       const errors: GmailHistoricalError[] = [];
       
       const toFetch = new Set<string>();
@@ -202,6 +206,8 @@ export class GmailIncrementalSyncService {
                           !message.labelIds.some(label => EXCLUDED_LABELS.has(label));
                           
           if (inScope) {
+            const classification = await this.classificationHook.classifyMessage(authorization, message, mailbox.id);
+            if (classification) classifications.push(classification);
             writes.push({
               providerMessageId: message.id,
               threadId: message.threadId,
@@ -223,6 +229,7 @@ export class GmailIncrementalSyncService {
             });
           }
         } catch (error) {
+          if (error instanceof Error && error.message.startsWith('Email classifier')) throw error;
           const err = error as Record<string, unknown> | null;
           if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && (err.response as Record<string, unknown>).status === 404) {
              writes.push({
@@ -241,7 +248,7 @@ export class GmailIncrementalSyncService {
       }
 
       (global as any).__GMAIL_SYNC_STAGE = 'batch commit';
-      persisted += await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
+      persisted += classifications.length > 0 ? await this.repository.commitBatch(mailbox, syncRunId, writes, errors, classifications) : await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
       processed += writes.length;
       
       pageToken = listed.data.nextPageToken;

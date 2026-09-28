@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import { db } from '../../database';
 import type { GmailMailboxConfig } from './types';
+import { KnexEmailClassificationRepository, type ClassificationPersistenceInput } from './classification.repository';
 
 export interface GmailHistoricalMailbox {
   id: string;
@@ -29,7 +30,7 @@ export interface GmailHistoricalRepository {
   recoverInterruptedRun(entityType: string): Promise<void>;
   ensureMailbox(mailbox: GmailMailboxConfig): Promise<GmailHistoricalMailbox>;
   createSyncRun(entityType: string): Promise<string>;
-  commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number>;
+  commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[], classifications?: ClassificationPersistenceInput[]): Promise<number>;
   completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number, historyId: string | null): Promise<void>;
   failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void>;
   getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null }>;
@@ -110,7 +111,7 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
     return id;
   }
 
-  public async commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number> {
+  public async commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[], classifications: ClassificationPersistenceInput[] = []): Promise<number> {
     let persisted = 0;
     await this.database.transaction(async (trx) => {
       for (const message of messages) {
@@ -142,6 +143,8 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
           payload: null,
         })));
       }
+      const classificationRepository = new KnexEmailClassificationRepository(this.database);
+      for (const classification of classifications) await classificationRepository.persistInTransaction(trx, classification);
     });
     return persisted;
   }
