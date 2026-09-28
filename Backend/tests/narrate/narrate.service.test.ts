@@ -42,7 +42,8 @@ function extractId(row: unknown): string {
 // outcome for the specific row(s) it created, looked up by id.
 describe('NarrateService', () => {
   beforeEach(async () => {
-    await db('detected_alerts').where('period_start', '>=', '2096-01-01').delete();
+    // Bounded to this file's own year: other test files share this table concurrently.
+    await db('detected_alerts').where('period_start', '>=', '2096-01-01').andWhere('period_start', '<', '2097-01-01').delete();
   });
 
   it('narrates an alert missing a narrative and persists the result', async () => {

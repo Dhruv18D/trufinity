@@ -21,7 +21,8 @@ function callRow(receivedAt: Date, booked: boolean, objections: string[] | null 
 
 describe('DetectService', () => {
   beforeEach(async () => {
-    await db('detected_alerts').where('period_start', '>=', '2097-01-01').delete();
+    // Bounded to this file's own year: other test files share this table concurrently.
+    await db('detected_alerts').where('period_start', '>=', '2097-01-01').andWhere('period_start', '<', '2098-01-01').delete();
     await db('canonical_lace_calls').where('received_at', '>=', '2097-05-01').andWhere('received_at', '<', '2097-07-01').delete();
   });
 
@@ -41,7 +42,7 @@ describe('DetectService', () => {
     const ruleCodes = result.findings.map((f) => f.ruleCode).sort();
     expect(ruleCodes).toEqual(['D-01', 'D-06']);
 
-    const stored = await db('detected_alerts').where('period_start', '>=', '2097-01-01');
+    const stored = await db('detected_alerts').where('period_start', '>=', '2097-01-01').andWhere('period_start', '<', '2098-01-01');
     expect(stored).toHaveLength(2);
   });
 
@@ -56,7 +57,7 @@ describe('DetectService', () => {
     await new DetectService().run(NOW);
     await new DetectService().run(NOW);
 
-    const stored = await db('detected_alerts').where({ rule_code: 'D-01' }).andWhere('period_start', '>=', '2097-01-01');
+    const stored = await db('detected_alerts').where({ rule_code: 'D-01' }).andWhere('period_start', '>=', '2097-01-01').andWhere('period_start', '<', '2098-01-01');
     expect(stored).toHaveLength(1);
   });
 
@@ -64,7 +65,7 @@ describe('DetectService', () => {
     const result = await new DetectService().run(NOW);
 
     expect(result.findings).toHaveLength(0);
-    const stored = await db('detected_alerts').where('period_start', '>=', '2097-01-01');
+    const stored = await db('detected_alerts').where('period_start', '>=', '2097-01-01').andWhere('period_start', '<', '2098-01-01');
     expect(stored).toHaveLength(0);
   });
 });

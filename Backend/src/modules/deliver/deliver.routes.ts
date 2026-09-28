@@ -13,8 +13,17 @@ router.get('/alerts', async (req, res, next) => {
   }
 });
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/alerts/:id', async (req, res, next) => {
   try {
+    // A non-UUID id can never match a row; without this Postgres rejects the
+    // query ("invalid input syntax for type uuid") and the client gets a 500
+    // instead of the documented 404.
+    if (!UUID_PATTERN.test(req.params.id)) {
+      res.status(404).json({ error: 'Alert not found' });
+      return;
+    }
     const alert = await deliverService.getAlertById(req.params.id);
     if (!alert) {
       res.status(404).json({ error: 'Alert not found' });
