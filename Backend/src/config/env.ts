@@ -42,6 +42,14 @@ const envSchema = z.object({
     })
     .transform(sanitizeApprovedMailboxAllowlist),
 
+  // Layer B classifier foundation. Disabled until provider/model/threshold are approved.
+  GMAIL_CLASSIFIER_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  GMAIL_CLASSIFIER_PROVIDER: z.string().default('anthropic'),
+  GMAIL_CLASSIFIER_MODEL: z.string().default(''),
+  GMAIL_CLASSIFIER_CONFIDENCE_THRESHOLD: z.preprocess((value) => value === '' ? undefined : value, z.coerce.number().min(0).max(1).optional()),
+  GMAIL_CLASSIFIER_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
+  GMAIL_CLASSIFIER_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(2),
+  GMAIL_CLASSIFIER_PROMPT_VERSION: z.string().default('v1'),
   // ServiceTitan
   SERVICETITAN_CLIENT_ID: z.string().default(''),
   SERVICETITAN_CLIENT_SECRET: z.string().default(''),
