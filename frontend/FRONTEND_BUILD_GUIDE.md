@@ -211,32 +211,36 @@ All money fields are **decimal strings** (e.g. `"12345.67"`) — never parse the
 
 ### 4.7 `GET /api/brief/alerts` (optional query: `?ruleCode=D-01`)
 
-Returns a **bare array** (not wrapped in `{status, data}` — note the difference from the reporting endpoints above), newest first:
+Returns the same `{ status, data }` envelope as the reporting endpoints above, with `data` an array, newest first:
 
 ```json
-[
-  {
-    "id": "uuid",
-    "rule_code": "D-01",
-    "dimension": "TENANT_TOTAL",
-    "period_start": "2026-09-01T00:00:00.000Z",
-    "period_end": "2026-09-08T00:00:00.000Z",
-    "baseline_start": "2026-08-01T00:00:00.000Z",
-    "baseline_end": "2026-08-08T00:00:00.000Z",
-    "metric_value": "0.42",
-    "baseline_value": "0.55",
-    "details": { "...": "rule-specific JSON, render as key/value list" },
-    "narrative": "Booking rate fell to 42% this week, down from 55%...",
-    "narrated_at": "2026-09-08T06:00:00.000Z",
-    "detected_at": "2026-09-08T05:58:00.000Z"
-  }
-]
+{
+  "status": "success",
+  "data": [
+    {
+      "id": "uuid",
+      "rule_code": "D-01",
+      "dimension": "TENANT_TOTAL",
+      "period_start": "2026-09-01T00:00:00.000Z",
+      "period_end": "2026-09-08T00:00:00.000Z",
+      "baseline_start": "2026-08-01T00:00:00.000Z",
+      "baseline_end": "2026-08-08T00:00:00.000Z",
+      "metric_value": "0.42",
+      "baseline_value": "0.55",
+      "details": { "...": "rule-specific JSON, render as key/value list" },
+      "narrative": "Booking rate fell to 42% this week, down from 55%...",
+      "narrated_at": "2026-09-08T06:00:00.000Z",
+      "detected_at": "2026-09-08T05:58:00.000Z"
+    }
+  ]
+}
 ```
+`metric_value` / `baseline_value` are **fractions** (`"0.42"` = 42%), for both D-01 and D-06 — multiply by 100 to display.
 `narrative` can be `null` if the Narrate step hasn't run yet or failed validation — in that case, render the raw `rule_code` + `metric_value`/`baseline_value` as a fallback (never block the UI on missing narrative text).
 
 ### 4.8 `GET /api/brief/alerts/:id`
 
-Same single-object shape as one array element above, or `404 { "error": "Alert not found" }`.
+`{ "status": "success", "data": { ...one alert, same shape as an array element above } }`, or `404 { "status": "error", "message": "Alert not found" }` (also returned for a malformed, non-UUID id).
 
 ### Diagnostic-only endpoints — do NOT build UI against these
 

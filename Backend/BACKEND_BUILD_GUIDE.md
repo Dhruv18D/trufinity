@@ -151,7 +151,7 @@ tests/                       # mirrors src/modules structure exactly, one test f
 ### 3.5 API/routes conventions
 
 - One `<module>.routes.ts` file per module, `Router()` from Express, mounted in `src/app.ts` under `/api/<area>/<module>`.
-- Response shape so far is inconsistent between modules — reporting/quickbooks integration routes wrap in `{ status: 'success', data: ... }`; deliver/alerts routes return bare arrays/objects. Follow whichever convention the *closest sibling module* uses; don't invent a third shape.
+- Every route uses the same envelope: `{ status: 'success', data: ... }` on success and `{ status: 'error', message: '...' }` on failure (quickbooks, reporting and deliver/alerts all follow it). Keep new routes on this shape — the frontend depends on it. (Dev-only gating middleware still returns a bare `{ error }` 403; that's the one known exception.)
 - Dev-only diagnostic routes (that hit a live third-party API directly rather than the warehouse) are gated behind `devOnly` middleware (`src/middleware/dev-only.middleware.ts`) and must never be treated as the production data path for a dashboard.
 - Read-only is a hard rule for all source-system integrations (ServiceTitan, QuickBooks) — **never add a write/POST-to-source-system endpoint**, no exceptions, per spec Section 2.2 and Section 11.
 
