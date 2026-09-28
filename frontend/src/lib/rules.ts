@@ -30,8 +30,8 @@ export const rules: Record<string, RuleMeta> = {
     label: "Objection category spike",
     section: "demand",
     severity: "amber",
-    metricLabel: "Objections",
-    metricFormat: "number",
+    metricLabel: "Objection rate",
+    metricFormat: "ratio",
   },
 };
 

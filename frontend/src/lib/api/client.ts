@@ -53,16 +53,3 @@ export async function apiGetPage<T>(path: string, query?: Query): Promise<Pagina
   const { page, pageSize, totalCount, data } = await request<Paginated<T>>(path, query);
   return { page, pageSize, totalCount, data };
 }
-
-/** For endpoints that return bare JSON (no `{ status, data }` envelope). Returns null on 404. */
-export async function apiGetJson<T>(path: string, query?: Query): Promise<T | null> {
-  let res: Response;
-  try {
-    res = await fetch(buildUrl(path, query), { cache: "no-store" });
-  } catch {
-    throw new ApiError(`Backend unreachable at ${BASE_URL}`);
-  }
-  if (res.status === 404) return null;
-  if (!res.ok) throw new ApiError(`GET ${path} failed with ${res.status}`, res.status);
-  return (await res.json()) as T;
-}
