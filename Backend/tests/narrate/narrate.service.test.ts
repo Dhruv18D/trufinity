@@ -198,4 +198,19 @@ describe('findUnverifiedNumbers', () => {
 
     expect(findUnverifiedNumbers(narrative, payload)).toEqual([]);
   });
+
+  it('does not flag a number embedded in a descriptive string field (e.g. ruleDescription) that the model echoes back', () => {
+    // Reproduces a real failure: ruleDescription says "...trailing 4-week
+    // average" - "4" was invisible to the validator (only the whole-string
+    // value was checked as one number, never its embedded digits), so a
+    // model that wrote "4-week" instead of "four-week" was wrongly rejected.
+    const payload = {
+      ruleDescription: 'Tenant-wide call booking rate has declined compared to the trailing 4-week average.',
+      metricValuePercent: 50,
+      baselineValuePercent: 80,
+    };
+    const narrative = 'Booking rate fell to 50%, down from the trailing 4-week average of 80%.';
+
+    expect(findUnverifiedNumbers(narrative, payload)).toEqual([]);
+  });
 });

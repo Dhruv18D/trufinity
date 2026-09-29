@@ -97,6 +97,12 @@ function collectAllowedNumbers(payload: Record<string, unknown>): Set<number> {
     if (typeof value === 'string') {
       const parsed = Number(value);
       if (Number.isFinite(parsed) && value.trim().length > 0) allowed.add(parsed);
+      // A descriptive string (e.g. ruleDescription: "...the trailing 4-week
+      // average") can carry numbers embedded in prose, not the whole field.
+      // The model reasonably echoes these back, so they must count as
+      // allowed too - otherwise validation fails unpredictably depending on
+      // whether the model happens to write a window size etc. as a digit.
+      for (const match of value.match(/-?\d+(\.\d+)?/g) ?? []) allowed.add(Number(match));
       return;
     }
     if (Array.isArray(value)) {
