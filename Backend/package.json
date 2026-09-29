@@ -14,6 +14,7 @@
     "google:gmail-historical-sync": "node dist/scripts/google-gmail-historical-sync.js",
     "auth:create-user": "node dist/scripts/auth-create-user.js",
     "google:gmail-incremental-sync": "node dist/scripts/google-gmail-incremental-sync.js",
+    "google:gmail-classifier-test": "node dist/scripts/google-gmail-classifier-test.js",
     "lint": "eslint \"src/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "jest",
