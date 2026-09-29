@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { FinancialOverview, FinancialOverviewSkeleton } from "@/components/sections/FinancialOverview";
+import { DemandAlerts, DemandAlertsSkeleton } from "@/components/sections/DemandAlerts";
 import { FieldOperationsSnapshot } from "@/components/sections/servicetitan/FieldOperationsSnapshot";
 import { SkeletonCard } from "@/components/ui/States";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -18,6 +19,7 @@ const flaggedItems: FlaggedItem[] = [];
 
 const quickLinks = [
   { href: "/daily-brief", label: "Daily Executive Brief", description: "Today's brief in the fixed spec section order", icon: "sun" },
+  { href: "/demand-alerts", label: "Demand Alerts", description: "Booking-rate declines & objection spikes", icon: "bell" },
   { href: "/field-operations", label: "Field Operations", description: "ServiceTitan jobs, invoices, AR aging & schedule", icon: "building" },
   { href: "/scorecard", label: "Scorecard", description: "KPIs vs. targets across the business", icon: "bar-chart" },
   { href: "/escalations", label: "Customer Escalations", description: "Problem emails, calls & reviews", icon: "alert-circle" },
@@ -97,8 +99,18 @@ export default function DashboardPage() {
         </div>
 
         <Card>
-          <CardHeader title="Demand Alerts" subtitle="D-series booking & objection exceptions" />
-          {!sectionReady.demandAlerts && <PendingState />}
+          <CardHeader
+            title="Demand Alerts"
+            subtitle="D-series booking & objection exceptions"
+            action={
+              <Link href="/demand-alerts" className="text-xs font-medium text-teal-dark hover:underline">
+                View all
+              </Link>
+            }
+          />
+          <Suspense fallback={<DemandAlertsSkeleton />}>
+            <DemandAlerts limit={3} />
+          </Suspense>
         </Card>
       </div>
 

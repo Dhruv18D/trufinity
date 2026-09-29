@@ -7,20 +7,32 @@ router.get('/alerts', async (req, res, next) => {
   try {
     const filters = typeof req.query.ruleCode === 'string' ? { ruleCode: req.query.ruleCode } : {};
     const alerts = await deliverService.listAlerts(filters);
-    res.json(alerts);
+    // Same envelope as the rest of the API: { status: 'success', data } on
+    // success, { status: 'error', message } on failure (see quickbooks.routes.ts
+    // and error.middleware.ts).
+    res.json({ status: 'success', data: alerts });
   } catch (err) {
     next(err);
   }
 });
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/alerts/:id', async (req, res, next) => {
   try {
-    const alert = await deliverService.getAlertById(req.params.id);
-    if (!alert) {
-      res.status(404).json({ error: 'Alert not found' });
+    // A non-UUID id can never match a row; without this Postgres rejects the
+    // query ("invalid input syntax for type uuid") and the client gets a 500
+    // instead of the documented 404.
+    if (!UUID_PATTERN.test(req.params.id)) {
+      res.status(404).json({ status: 'error', message: 'Alert not found' });
       return;
     }
-    res.json(alert);
+    const alert = await deliverService.getAlertById(req.params.id);
+    if (!alert) {
+      res.status(404).json({ status: 'error', message: 'Alert not found' });
+      return;
+    }
+    res.json({ status: 'success', data: alert });
   } catch (err) {
     next(err);
   }

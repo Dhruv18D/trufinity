@@ -1,6 +1,7 @@
 import type { Knex } from 'knex';
 import { db } from '../../database';
 import type { GmailMailboxConfig } from './types';
+import { KnexEmailClassificationRepository, type ClassificationPersistenceInput } from './classification.repository';
 
 export interface GmailHistoricalMailbox {
   id: string;
@@ -29,11 +30,12 @@ export interface GmailHistoricalRepository {
   recoverInterruptedRun(entityType: string): Promise<void>;
   ensureMailbox(mailbox: GmailMailboxConfig): Promise<GmailHistoricalMailbox>;
   createSyncRun(entityType: string): Promise<string>;
-  commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number>;
+  commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[], classifications?: ClassificationPersistenceInput[]): Promise<number>;
   completeMailbox(mailbox: GmailHistoricalMailbox, syncRunId: string, recordsProcessed: number, historicalWindowDays: number, historyId: string | null): Promise<void>;
   failSyncRun(syncRunId: string, recordsProcessed: number, safeMessage: string): Promise<void>;
   getSyncMetadata(mailboxId: string): Promise<{ historyId: string | null; lastSuccessfulHistoryId: string | null }>;
   updateSyncMetadata(mailboxId: string, historyId: string): Promise<void>;
+  completeIncrementalRun(mailboxId: string, syncRunId: string, newHistoryId: string | null, recordsProcessed: number): Promise<void>;
 }
 
 const SOURCE_SYSTEM = 'GoogleWorkspace';
@@ -45,6 +47,11 @@ const stableJson = (value: unknown): string => {
   }
   return JSON.stringify(value);
 };
+
+// raw_gmail_messages.payload is NOT NULL. Deletion/out-of-scope tombstones carry
+// no Gmail content, so they persist an empty JSON object; is_deleted = true is
+// what distinguishes them from live rows.
+export const TOMBSTONE_PAYLOAD: Record<string, unknown> = Object.freeze({});
 
 export class KnexGmailHistoricalRepository implements GmailHistoricalRepository {
   public constructor(private readonly database: Knex = db) {}
@@ -104,23 +111,25 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
     return id;
   }
 
-  public async commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[]): Promise<number> {
+  public async commitBatch(mailbox: GmailHistoricalMailbox, syncRunId: string, messages: GmailHistoricalMessageWrite[], errors: GmailHistoricalError[], classifications: ClassificationPersistenceInput[] = []): Promise<number> {
     let persisted = 0;
     await this.database.transaction(async (trx) => {
       for (const message of messages) {
+        const isDeleted = message.isDeleted ?? false;
+        const payload = message.payload ?? (isDeleted ? TOMBSTONE_PAYLOAD : null);
         const current = await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).first('payload', 'is_deleted');
-        if (current && current.is_deleted === (message.isDeleted ?? false) && stableJson(current.payload) === stableJson(message.payload)) continue;
+        if (current && current.is_deleted === isDeleted && stableJson(current.payload) === stableJson(payload)) continue;
         await trx('raw_gmail_messages').where({ mailbox_id: mailbox.id, provider_message_id: message.providerMessageId, is_latest: true }).update({ is_latest: false });
         await trx('raw_gmail_messages').insert({
           mailbox_id: mailbox.id,
           mailbox_address: mailbox.normalizedMailboxAddress,
           provider_message_id: message.providerMessageId,
           thread_id: message.threadId,
-          payload: message.payload,
+          payload,
           content_mode: message.contentMode,
           internal_date: message.internalDate,
           provider_history_id: message.providerHistoryId,
-          is_deleted: message.isDeleted ?? false,
+          is_deleted: isDeleted,
           is_latest: true,
           sync_run_id: syncRunId,
         });
@@ -134,6 +143,8 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
           payload: null,
         })));
       }
+      const classificationRepository = new KnexEmailClassificationRepository(this.database);
+      for (const classification of classifications) await classificationRepository.persistInTransaction(trx, classification);
     });
     return persisted;
   }
@@ -189,6 +200,40 @@ export class KnexGmailHistoricalRepository implements GmailHistoricalRepository 
       last_successful_history_id: historyId,
       last_successful_sync_at: this.database.fn.now(),
       updated_at: this.database.fn.now(),
+    });
+  }
+
+  // Incremental-sync-specific completion. Unlike completeMailbox() (used by the
+  // historical sync), this must NOT touch historical_page_token or state: those
+  // belong exclusively to the historical pagination lifecycle. Checkpoint
+  // advancement and marking the sync_runs row COMPLETED are done in one
+  // transaction so a crash can never leave the checkpoint advanced with the
+  // run still RUNNING, or vice versa. The status='RUNNING' guard scopes the
+  // update to exactly the run this execution created and makes the call
+  // idempotent if it were ever invoked twice for the same run.
+  public async completeIncrementalRun(mailboxId: string, syncRunId: string, newHistoryId: string | null, recordsProcessed: number): Promise<void> {
+    await this.database.transaction(async (trx) => {
+      if (newHistoryId) {
+        await trx('raw_gmail_sync_metadata').where({ mailbox_id: mailboxId }).update({
+          history_id: newHistoryId,
+          last_successful_history_id: newHistoryId,
+          last_successful_sync_at: trx.fn.now(),
+          updated_at: trx.fn.now(),
+        });
+      }
+      const updatedRunCount = await trx('sync_runs').where({ id: syncRunId, status: 'RUNNING' }).update({
+        status: 'COMPLETED',
+        records_processed: recordsProcessed,
+        completed_at: trx.fn.now(),
+      });
+      // Production tracking integrity: a successful completion must correspond to
+      // exactly one RUNNING sync_runs row. If zero rows matched (the row was
+      // already recovered/failed/completed elsewhere, or the id is stale), throwing
+      // here rolls back this entire transaction, including the checkpoint update
+      // above, rather than silently advancing the checkpoint with no completed run.
+      if (updatedRunCount !== 1) {
+        throw new Error(`Google Workspace Gmail incremental sync completion did not match exactly one RUNNING sync_runs row (matched ${updatedRunCount}) for id ${syncRunId}.`);
+      }
     });
   }
 }

@@ -3,10 +3,49 @@ import { db } from '../../database';
 import { env } from '../../config/env';
 import { logger } from '../../utils/logger';
 import { SYNC_RUNS_TABLE, SYNC_RUN_STATUS, SOURCE_SYSTEM } from '../../utils/sync-run.constants';
+import { withAdvisoryLock } from '../../utils/advisory-lock';
+import { detectService } from '../detect/detect.service';
+import { narrateService } from '../narrate/narrate.service';
 import { laceCallAnalysisIngestionService } from './ingestion/call-analysis.ingestion';
 import { laceAgentPerformanceIngestionService } from './ingestion/agent-performance.ingestion';
 import { LaceSyncInProgressError } from './ingestion/lace-raw.ingestion';
 import { callAnalysisCanonicalService } from './canonical/call-analysis.canonical.service';
+
+const DETECT_NARRATE_LOCK_KEY = 'trufinity:detect-narrate-pipeline';
+
+class DetectNarrateInProgressError extends Error {
+  public constructor() {
+    super('Detect/Narrate pipeline is already running.');
+    this.name = 'DetectNarrateInProgressError';
+  }
+}
+
+// Detect and Narrate previously ran only from dev-only routes (403 outside
+// NODE_ENV=development), so in production nothing ever produced or narrated
+// detected_alerts - the dashboard API would have served an empty list forever.
+// The Postgres advisory lock keeps two app instances firing the same cron
+// tick from double-narrating one alert (a duplicate, billed LLM call).
+async function runDetectAndNarrate(): Promise<void> {
+  try {
+    await withAdvisoryLock(db, DETECT_NARRATE_LOCK_KEY, () => new DetectNarrateInProgressError(), async () => {
+      const detected = await detectService.run();
+      logger.info('[LaceAI] Detect completed after canonical sync', { findings: detected.findings.length });
+
+      if (env.ANTHROPIC_API_KEY.length === 0) {
+        logger.warn('[LaceAI] Narrate skipped: ANTHROPIC_API_KEY is not configured; alerts stay un-narrated');
+        return;
+      }
+      const narrated = await narrateService.run();
+      logger.info('[LaceAI] Narrate completed after detect', narrated);
+    });
+  } catch (error) {
+    if (error instanceof DetectNarrateInProgressError) {
+      logger.info('[LaceAI] Detect/Narrate skipped: already running on another instance');
+      return;
+    }
+    throw error;
+  }
+}
 
 interface LaceScheduledSync {
   exportType: string;
@@ -27,6 +66,7 @@ const SCHEDULED_SYNCS: LaceScheduledSync[] = [
     afterSuccess: async () => {
       const result = await callAnalysisCanonicalService.sync();
       logger.info('[LaceAI] Canonical call analysis sync completed after scheduled ingestion', result);
+      await runDetectAndNarrate();
     },
   },
   {

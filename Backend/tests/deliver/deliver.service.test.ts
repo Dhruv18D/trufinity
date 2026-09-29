@@ -19,7 +19,8 @@ function insertAlert(overrides: Partial<Record<string, unknown>> = {}) {
 
 describe('DeliverService', () => {
   beforeEach(async () => {
-    await db('detected_alerts').where('period_start', '>=', '2095-01-01').delete();
+    // Bounded to this file's own year: other test files share this table concurrently.
+    await db('detected_alerts').where('period_start', '>=', '2095-01-01').andWhere('period_start', '<', '2096-01-01').delete();
   });
 
   it('lists alerts newest-first', async () => {
@@ -27,7 +28,7 @@ describe('DeliverService', () => {
     await insertAlert({ dimension: 'B', detected_at: new Date('2095-06-17T00:00:00Z') });
 
     const alerts = await new DeliverService().listAlerts();
-    const relevant = alerts.filter((a) => a.period_start >= PERIOD_START);
+    const relevant = alerts.filter((a) => a.period_start >= PERIOD_START && a.period_start < new Date('2096-01-01T00:00:00.000Z'));
 
     expect(relevant.map((a) => a.dimension)).toEqual(['B', 'A']);
   });
@@ -37,7 +38,7 @@ describe('DeliverService', () => {
     await insertAlert({ rule_code: 'D-06', dimension: 'B' });
 
     const alerts = await new DeliverService().listAlerts({ ruleCode: 'D-06' });
-    const relevant = alerts.filter((a) => a.period_start >= PERIOD_START);
+    const relevant = alerts.filter((a) => a.period_start >= PERIOD_START && a.period_start < new Date('2096-01-01T00:00:00.000Z'));
 
     expect(relevant).toHaveLength(1);
     expect(relevant[0].dimension).toBe('B');

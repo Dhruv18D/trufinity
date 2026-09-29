@@ -54,3 +54,22 @@ export function formatEnumLabel(value: string | null | undefined): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
+
+const percentFormatter = new Intl.NumberFormat("en-CA", { style: "percent", maximumFractionDigits: 1 });
+const numberFormatter = new Intl.NumberFormat("en-CA", { maximumFractionDigits: 2 });
+
+/** Formats a backend ratio string ("0.4200") as a percentage ("42%"), without float parsing. */
+export function formatRatio(value: string | null | undefined): string {
+  if (value == null || value.trim() === "") return "—";
+  return percentFormatter.format(value as Intl.StringNumericLiteral);
+}
+
+export function formatDecimal(value: string | null | undefined): string {
+  if (value == null || value.trim() === "") return "—";
+  return numberFormatter.format(value as Intl.StringNumericLiteral);
+}
+
+/** "dropPoints" / "drop_points" -> "Drop Points" */
+export function humanizeKey(key: string): string {
+  return formatEnumLabel(key.replace(/([a-z0-9])([A-Z])/g, "$1_$2"));
+}

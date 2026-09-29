@@ -28,6 +28,8 @@ import {
   type GmailHistoricalAllResult,
   gmailHistoricalSyncService,
 } from './gmail-historical.service';
+import { gmailClassificationHook, type GmailClassificationHook } from './gmail-classification.service';
+import type { ClassificationPersistenceInput } from './classification.repository';
 
 export class GmailIncrementalSyncService {
   public constructor(
@@ -35,6 +37,7 @@ export class GmailIncrementalSyncService {
     private readonly directoryService = googleWorkspaceDirectoryService,
     private readonly repository = gmailHistoricalRepository,
     private readonly historicalService = gmailHistoricalSyncService,
+    private readonly classificationHook: GmailClassificationHook = gmailClassificationHook,
   ) {}
 
   public async runMailbox(mailboxAddress: string): Promise<GmailHistoricalSyncResult> {
@@ -95,20 +98,18 @@ export class GmailIncrementalSyncService {
     let syncRunId: string | null = null;
     let processed = 0;
     try {
+      (global as any).__GMAIL_SYNC_STAGE = 'sync-run creation';
       syncRunId = await this.repository.createSyncRun(entityType);
       
       const result = await this.syncHistory(authorization, mailbox, syncRunId, startHistoryId);
       processed = result.processed;
-      
-      if (result.newHistoryId) {
-        await this.repository.updateSyncMetadata(mailbox.id, result.newHistoryId);
-      }
-      
-      // Update sync run to completed (reusing logic, but we need to mark it COMPLETED directly)
-      // Since completeMailbox resets historical window, we should just update the run manually or add a method.
-      // For now we can use a direct DB call or a new method. Wait, I can't call DB directly if repository encapsulates it.
-      // Let's create completeIncrementalRun in repository, but for now I'll just use a knex call if possible. Oh wait, this class doesn't have knex.
-      
+
+      // Advance the checkpoint and finalize this sync_runs row as COMPLETED
+      // atomically: both happen only after all History API pages have been
+      // persisted above, and either both land or neither does.
+      (global as any).__GMAIL_SYNC_STAGE = 'checkpoint completion';
+      await this.repository.completeIncrementalRun(mailbox.id, syncRunId, result.newHistoryId, processed);
+
       return { mailboxAddress: mailbox.normalizedMailboxAddress, contentMode: authorization.mailbox.contentMode, syncRunId, recordsProcessed: processed, recordsPersisted: result.persisted };
     } catch (error) {
       if (syncRunId) await this.repository.failSyncRun(syncRunId, processed, safeErrorMessage(error));
@@ -135,6 +136,7 @@ export class GmailIncrementalSyncService {
     let newHistoryId: string | null = null;
 
     while (!stop) {
+      (global as any).__GMAIL_SYNC_STAGE = 'history.list';
       const listed = await withRetry(async () => authorization.client.users.history.list({
         userId: 'me', startHistoryId, maxResults: PAGE_SIZE, ...(pageToken ? { pageToken } : {}),
       }));
@@ -144,6 +146,7 @@ export class GmailIncrementalSyncService {
       }
 
       const writes: GmailHistoricalMessageWrite[] = [];
+      const classifications: ClassificationPersistenceInput[] = [];
       const errors: GmailHistoricalError[] = [];
       
       const toFetch = new Set<string>();
@@ -187,6 +190,7 @@ export class GmailIncrementalSyncService {
         });
       }
 
+      (global as any).__GMAIL_SYNC_STAGE = 'message fetch';
       for (const msgId of toFetch) {
         try {
           const raw = await withRetry(async () => authorization.client.users.messages.get({
@@ -202,6 +206,8 @@ export class GmailIncrementalSyncService {
                           !message.labelIds.some(label => EXCLUDED_LABELS.has(label));
                           
           if (inScope) {
+            const classification = await this.classificationHook.classifyMessage(authorization, message, mailbox.id);
+            if (classification) classifications.push(classification);
             writes.push({
               providerMessageId: message.id,
               threadId: message.threadId,
@@ -223,6 +229,7 @@ export class GmailIncrementalSyncService {
             });
           }
         } catch (error) {
+          if (error instanceof Error && error.message.startsWith('Email classifier')) throw error;
           const err = error as Record<string, unknown> | null;
           if (err && typeof err === 'object' && err.response && typeof err.response === 'object' && (err.response as Record<string, unknown>).status === 404) {
              writes.push({
@@ -240,7 +247,8 @@ export class GmailIncrementalSyncService {
         }
       }
 
-      persisted += await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
+      (global as any).__GMAIL_SYNC_STAGE = 'batch commit';
+      persisted += classifications.length > 0 ? await this.repository.commitBatch(mailbox, syncRunId, writes, errors, classifications) : await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
       processed += writes.length;
       
       pageToken = listed.data.nextPageToken;

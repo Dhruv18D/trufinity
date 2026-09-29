@@ -8,6 +8,8 @@ import {
 import { gmailHistoricalRepository, type GmailHistoricalError, type GmailHistoricalMailbox, type GmailHistoricalMessageWrite, type GmailHistoricalRepository } from './gmail-historical.repository';
 import { isEligibleGmailSynchronizationMailbox, googleWorkspaceDirectoryService } from './workspace-directory.service';
 import type { GmailContentMode } from './types';
+import { gmailClassificationHook, type GmailClassificationHook } from './gmail-classification.service';
+import type { ClassificationPersistenceInput } from './classification.repository';
 
 export const INCLUDED_LABELS = ['INBOX', 'SENT'] as const;
 export const EXCLUDED_LABELS = new Set(['DRAFT', 'SPAM', 'TRASH']);
@@ -193,6 +195,7 @@ export class GmailHistoricalSyncService {
     private readonly repository: GmailHistoricalRepository = gmailHistoricalRepository,
     private readonly historicalDays: number = env.GOOGLE_GMAIL_HISTORICAL_DAYS,
     private readonly now: () => number = Date.now,
+    private readonly classificationHook: GmailClassificationHook = gmailClassificationHook,
   ) {}
 
   public async runMailbox(mailboxAddress: string, explicitCutoff?: Date): Promise<GmailHistoricalSyncResult> {
@@ -268,6 +271,7 @@ export class GmailHistoricalSyncService {
         userId: 'me', maxResults: PAGE_SIZE, includeSpamTrash: false, labelIds: [label], ...(pageToken ? { pageToken } : {}),
       }));
       const writes: GmailHistoricalMessageWrite[] = [];
+      const classifications: ClassificationPersistenceInput[] = [];
       const errors: GmailHistoricalError[] = [];
       for (const listedMessage of listed.data.messages ?? []) {
         if (typeof listedMessage.id !== 'string' || listedMessage.id.trim() === '') {
@@ -290,6 +294,8 @@ export class GmailHistoricalSyncService {
           stop = true;
           break;
         }
+        const classification = await this.classificationHook.classifyMessage(authorization, message, mailbox.id);
+        if (classification) classifications.push(classification);
         writes.push({
           providerMessageId: message.id,
           threadId: message.threadId,
@@ -299,7 +305,7 @@ export class GmailHistoricalSyncService {
           providerHistoryId: message.historyId,
         });
       }
-      persisted += await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
+      persisted += classifications.length > 0 ? await this.repository.commitBatch(mailbox, syncRunId, writes, errors, classifications) : await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
       processed += writes.length;
       pageToken = listed.data.nextPageToken;
       if (!pageToken) stop = true;
