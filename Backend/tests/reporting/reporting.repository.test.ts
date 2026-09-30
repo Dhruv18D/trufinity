@@ -23,19 +23,23 @@ class ReadOnlyDatabase {
 
 describe('Knex reporting repository', () => {
   it('returns invoice measures and classification counts without duplicate identity joins', async () => {
-    const database = new ReadOnlyDatabase([{
-      total_active_invoices: '4',
-      broken_target_count: '0',
-      paid_count: '1',
-      partially_paid_count: '1',
-      unpaid_count: '1',
-      zero_value_count: '1',
-      unsupported_count: '0',
-      invoice_total: '400.00',
-      outstanding_ar: '125.50',
-      total_tax: '20.00',
-      total_discount: '5.00',
-    }]);
+    // Two queries now: a standing (date-unscoped) broken-target-mapping
+    // count, then the date-scoped financial summary - see getInvoiceSummary.
+    const database = new ReadOnlyDatabase(
+      [{ broken_target_count: '0' }],
+      [{
+        total_active_invoices: '4',
+        paid_count: '1',
+        partially_paid_count: '1',
+        unpaid_count: '1',
+        zero_value_count: '1',
+        unsupported_count: '0',
+        invoice_total: '400.00',
+        outstanding_ar: '125.50',
+        total_tax: '20.00',
+        total_discount: '5.00',
+      }],
+    );
     const result = await new KnexReportingRepository(database as unknown as Knex).getInvoiceSummary();
     expect(result).toEqual({
       totalActiveInvoices: 4,

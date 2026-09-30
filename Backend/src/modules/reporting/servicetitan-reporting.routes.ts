@@ -1,5 +1,6 @@
 import { Router, type Request, type RequestHandler } from 'express';
 import { serviceTitanReportingService as service } from './servicetitan-reporting.service';
+import { parseDateRangeFilter, parseDepartmentFilter } from '../../utils/dashboard-filters';
 import type { StInvoiceListItem } from './servicetitan-reporting.types';
 
 const router = Router();
@@ -21,7 +22,16 @@ const simple = (handler: () => Promise<unknown>): RequestHandler => async (_req,
 };
 
 router.get('/summary', simple(() => service.getSnapshot()));
-router.get('/jobs/summary', simple(() => service.getJobsSummary()));
+// Date (default month-to-date) and Department (default "Company") filters -
+// e.g. ?from=2026-09-01&to=2026-09-30&department=Service.
+router.get('/jobs/summary', async (req, res, next) => {
+  try {
+    const data = await service.getJobsSummary(parseDateRangeFilter(req), parseDepartmentFilter(req));
+    res.json({ status: 'success', data });
+  } catch (err) {
+    next(err);
+  }
+});
 router.get('/invoices/summary', simple(() => service.getInvoicesSummary()));
 router.get('/invoices/ar-aging', simple(() => service.getArAging()));
 router.get('/payments/summary', simple(() => service.getPaymentsSummary()));

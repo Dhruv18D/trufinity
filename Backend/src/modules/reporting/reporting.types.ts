@@ -1,3 +1,5 @@
+import type { DateRangeFilter } from '../../utils/dashboard-filters';
+
 export interface InvoiceSummary {
   totalActiveInvoices: number;
   paidCount: number;
@@ -53,8 +55,8 @@ export interface PaymentApplicationIntegritySummary {
 }
 
 export interface ReportingRepository {
-  getInvoiceSummary(): Promise<InvoiceSummary>;
-  getPaymentSummary(): Promise<PaymentSummary>;
+  getInvoiceSummary(dateRange?: DateRangeFilter): Promise<InvoiceSummary>;
+  getPaymentSummary(dateRange?: DateRangeFilter): Promise<PaymentSummary>;
   getQboCompleteness(): Promise<QboCompletenessReport>;
   getCustomerIdentityQuality(): Promise<CustomerIdentityQualitySummary>;
   getPaymentApplicationIntegrity(): Promise<PaymentApplicationIntegritySummary>;

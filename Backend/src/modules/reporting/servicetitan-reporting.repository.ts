@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { db } from '../../database';
+import { defaultDateRangeFilter, type DateRangeFilter, type ServiceTitanDepartment } from '../../utils/dashboard-filters';
 import type {
   CountByLabel,
   Paginated,
@@ -44,8 +45,27 @@ const ST_INVOICE_ACTIVE = `COALESCE((payload->>'active')::boolean, true) = true`
 export class KnexServiceTitanReportingRepository {
   public constructor(private readonly database: Knex = db) {}
 
-  public async getJobsSummary(): Promise<StJobsSummary> {
+  // Date filters on createdOn (when the job entered the pipeline, not when it
+  // closed) - this is a dashboard "activity this period" view. Department
+  // resolves payload->>'businessUnitId' against raw_st_business_units.name;
+  // a job whose business unit hasn't been ingested yet (or has none) is
+  // excluded from every department slice rather than silently miscounted
+  // into "Company" - see business-unit.ingestion.ts.
+  public async getJobsSummary(
+    dateRange: DateRangeFilter = defaultDateRangeFilter(),
+    department: ServiceTitanDepartment = 'Company',
+  ): Promise<StJobsSummary> {
+    const scoped = `
+      SELECT j.payload AS payload
+      FROM raw_st_jobs j
+      JOIN raw_st_business_units bu ON bu.is_latest = true AND bu.source_id = j.payload->>'businessUnitId'
+      WHERE j.is_latest = true
+        AND (j.payload->>'createdOn')::timestamptz >= ? AND (j.payload->>'createdOn')::timestamptz < ?
+        AND bu.payload->>'name' = ?
+    `;
+    const bindings: Knex.RawBinding[] = [dateRange.from.toISOString(), dateRange.to.toISOString(), department];
     const [row] = await readRows<Record<string, unknown>>(this.database, `
+      WITH scoped AS (${scoped})
       SELECT
         COUNT(*)::int AS total_jobs,
         COUNT(*) FILTER (WHERE payload->>'jobStatus' = 'Completed')::int AS completed_jobs,
@@ -57,12 +77,13 @@ export class KnexServiceTitanReportingRepository {
         COUNT(*) FILTER (WHERE payload->>'jobStatus' = 'Completed' AND payload->>'invoiceId' IS NULL
           AND NOT COALESCE((payload->>'noCharge')::boolean, false))::int AS completed_not_invoiced,
         COALESCE(SUM((payload->>'total')::numeric), 0)::numeric AS jobs_total_value
-      FROM raw_st_jobs WHERE is_latest = true
-    `);
+      FROM scoped
+    `, bindings);
     const byStatus = await readRows<Record<string, unknown>>(this.database, `
+      WITH scoped AS (${scoped})
       SELECT COALESCE(payload->>'jobStatus', 'UNKNOWN') AS label, COUNT(*)::int AS count
-      FROM raw_st_jobs WHERE is_latest = true GROUP BY 1 ORDER BY 2 DESC
-    `);
+      FROM scoped GROUP BY 1 ORDER BY 2 DESC
+    `, bindings);
     return {
       totalJobs: count(row?.total_jobs),
       completedJobs: count(row?.completed_jobs),

@@ -9,6 +9,7 @@ import { jobService } from './services/job.service';
 import { appointmentService } from './services/appointment.service';
 import { invoiceService } from './services/invoice.service';
 import { paymentService } from './services/payment.service';
+import { serviceTitanBusinessUnitIngestionService } from './ingestion/business-unit.ingestion';
 
 const router = Router();
 
@@ -22,6 +23,18 @@ const devOnly = (_req: Request, res: Response, next: NextFunction) => {
 };
 
 router.use(devOnly);
+
+// Business Units are a small settings list (department names, e.g. "Company",
+// "Service", "New Construction") used to resolve the dashboard Department
+// filter - no scheduler runs ServiceTitan ingestion yet, so this is manual.
+router.post('/sync/business-units', async (_req, res, next) => {
+  try {
+    const result = await serviceTitanBusinessUnitIngestionService.run();
+    res.json({ status: 'success', data: result });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const handlePagination = (req: Request) => {
   const page = parseInt(req.query.page as string) || 1;

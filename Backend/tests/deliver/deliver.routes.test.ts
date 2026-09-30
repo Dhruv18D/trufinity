@@ -72,7 +72,9 @@ describe('GET /api/brief/alerts', () => {
     const olderId = typeof older === 'object' ? (older as { id: string }).id : String(older);
     const newerId = typeof newer === 'object' ? (newer as { id: string }).id : String(newer);
 
-    const response = await request(app).get('/api/brief/alerts');
+    // GET /api/brief/alerts now defaults to month-to-date; these fixtures use
+    // the 2094 sentinel year, so an explicit range is needed to see them.
+    const response = await request(app).get('/api/brief/alerts').query({ from: '2094-01-01', to: '2095-01-01' });
 
     const ids = ((response.body as { data: AlertBody[] }).data).map((a) => a.id);
     expect(ids.indexOf(newerId)).toBeGreaterThanOrEqual(0);

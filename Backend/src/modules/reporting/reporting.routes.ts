@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { reportingService } from './reporting.service';
+import { parseDateRangeFilter } from '../../utils/dashboard-filters';
 
 const router = Router();
 
@@ -14,9 +15,10 @@ router.get('/summary', async (_req, res, next) => {
 });
 
 // Invoice KPIs: totals, AR outstanding, paid/unpaid/partially-paid breakdown.
-router.get('/invoices/summary', async (_req, res, next) => {
+// Date filter (default month-to-date): ?from=2026-09-01&to=2026-09-30.
+router.get('/invoices/summary', async (req, res, next) => {
   try {
-    const data = await reportingService.getInvoiceSummary();
+    const data = await reportingService.getInvoiceSummary(parseDateRangeFilter(req));
     res.json({ status: 'success', data });
   } catch (err) {
     next(err);
@@ -24,9 +26,10 @@ router.get('/invoices/summary', async (_req, res, next) => {
 });
 
 // Payment KPIs: totals, applied/unapplied amounts, reconciliation status.
-router.get('/payments/summary', async (_req, res, next) => {
+// Date filter (default month-to-date): ?from=2026-09-01&to=2026-09-30.
+router.get('/payments/summary', async (req, res, next) => {
   try {
-    const data = await reportingService.getPaymentSummary();
+    const data = await reportingService.getPaymentSummary(parseDateRangeFilter(req));
     res.json({ status: 'success', data });
   } catch (err) {
     next(err);

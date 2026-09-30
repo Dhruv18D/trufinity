@@ -3,6 +3,9 @@ import { db } from '../../src/database';
 import { DeliverService } from '../../src/modules/deliver/deliver.service';
 
 const PERIOD_START = new Date('2095-06-08T00:00:00.000Z');
+// listAlerts() now defaults to month-to-date, which would hide these
+// sentinel-year fixtures - pass this to see the whole test year instead.
+const WIDE_RANGE = { from: new Date('2095-01-01T00:00:00.000Z'), to: new Date('2096-01-01T00:00:00.000Z') };
 
 function insertAlert(overrides: Partial<Record<string, unknown>> = {}) {
   return db('detected_alerts').insert({
@@ -10,6 +13,11 @@ function insertAlert(overrides: Partial<Record<string, unknown>> = {}) {
     dimension: 'TENANT_TOTAL',
     period_start: PERIOD_START,
     period_end: new Date('2095-06-15T00:00:00.000Z'),
+    // Defaults to a sentinel year (not real "now") so listAlerts()'s new
+    // month-to-date default filter doesn't need every test to pass an
+    // explicit dateRange, and rows stay isolated from concurrently-running
+    // test files/real data that share this table.
+    detected_at: new Date('2095-06-10T00:00:00.000Z'),
     metric_value: 0.5,
     baseline_value: 0.8,
     details: {},
@@ -27,7 +35,7 @@ describe('DeliverService', () => {
     await insertAlert({ dimension: 'A', detected_at: new Date('2095-06-16T00:00:00Z') });
     await insertAlert({ dimension: 'B', detected_at: new Date('2095-06-17T00:00:00Z') });
 
-    const alerts = await new DeliverService().listAlerts();
+    const alerts = await new DeliverService().listAlerts({ dateRange: WIDE_RANGE });
     const relevant = alerts.filter((a) => a.period_start >= PERIOD_START && a.period_start < new Date('2096-01-01T00:00:00.000Z'));
 
     expect(relevant.map((a) => a.dimension)).toEqual(['B', 'A']);
@@ -37,7 +45,7 @@ describe('DeliverService', () => {
     await insertAlert({ rule_code: 'D-01', dimension: 'A' });
     await insertAlert({ rule_code: 'D-06', dimension: 'B' });
 
-    const alerts = await new DeliverService().listAlerts({ ruleCode: 'D-06' });
+    const alerts = await new DeliverService().listAlerts({ ruleCode: 'D-06', dateRange: WIDE_RANGE });
     const relevant = alerts.filter((a) => a.period_start >= PERIOD_START && a.period_start < new Date('2096-01-01T00:00:00.000Z'));
 
     expect(relevant).toHaveLength(1);

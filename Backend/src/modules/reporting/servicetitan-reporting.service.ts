@@ -1,10 +1,13 @@
 import { KnexServiceTitanReportingRepository } from './servicetitan-reporting.repository';
+import type { DateRangeFilter, ServiceTitanDepartment } from '../../utils/dashboard-filters';
 import type { StInvoiceListItem, StReportingSnapshot } from './servicetitan-reporting.types';
 
 export class ServiceTitanReportingService {
   public constructor(private readonly repository: KnexServiceTitanReportingRepository = new KnexServiceTitanReportingRepository()) {}
 
-  public getJobsSummary() { return this.repository.getJobsSummary(); }
+  public getJobsSummary(dateRange?: DateRangeFilter, department?: ServiceTitanDepartment) {
+    return this.repository.getJobsSummary(dateRange, department);
+  }
   public getInvoicesSummary() { return this.repository.getInvoicesSummary(); }
   public getArAging() { return this.repository.getArAging(); }
   public getPaymentsSummary() { return this.repository.getPaymentsSummary(); }
