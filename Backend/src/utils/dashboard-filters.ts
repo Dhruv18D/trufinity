@@ -29,16 +29,16 @@ export function parseDateRangeFilter(req: Request): DateRangeFilter {
   };
 }
 
-// The three ServiceTitan Business Unit names this dashboard filters by.
-// "Company" is a real department (not an "all/no filter" option) and is the
-// default per product decision - each is a distinct, non-overlapping slice.
+// The three ServiceTitan Business Unit names this dashboard filters by -
+// each is a distinct, non-overlapping slice.
 export const SERVICETITAN_DEPARTMENTS = ['Company', 'Service', 'New Construction'] as const;
 export type ServiceTitanDepartment = (typeof SERVICETITAN_DEPARTMENTS)[number];
 
-export function parseDepartmentFilter(req: Request): ServiceTitanDepartment {
+// Omitted or invalid ?department= means no department filter, i.e. all jobs.
+export function parseDepartmentFilter(req: Request): ServiceTitanDepartment | undefined {
   const raw = req.query.department;
   if (typeof raw === 'string' && (SERVICETITAN_DEPARTMENTS as readonly string[]).includes(raw)) {
     return raw as ServiceTitanDepartment;
   }
-  return 'Company';
+  return undefined;
 }
