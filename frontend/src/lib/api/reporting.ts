@@ -1,5 +1,6 @@
 import { cache } from "react";
 import { apiGet } from "./client";
+import type { DateRange } from "../filters";
 
 /** Money values arrive as decimal strings, e.g. "12345.67". Format with formatMoney, never parse. */
 export type DecimalString = string;
@@ -75,8 +76,16 @@ const BASE = "/api/reporting/quickbooks";
 // Combined call for the dashboard's initial load; memoized per request.
 export const getQuickbooksSummary = cache(() => apiGet<QuickbooksSummary>(`${BASE}/summary`));
 
-export const getInvoiceSummary = () => apiGet<InvoiceSummary>(`${BASE}/invoices/summary`);
-export const getPaymentSummary = () => apiGet<PaymentSummary>(`${BASE}/payments/summary`);
+// Date-filterable (omitting the range = month-to-date). Memoized per request; `cache` needs
+// primitive args to hit, hence from/to rather than a range object.
+const invoiceSummary = cache((from?: string, to?: string) =>
+  apiGet<InvoiceSummary>(`${BASE}/invoices/summary`, { from, to }),
+);
+const paymentSummary = cache((from?: string, to?: string) =>
+  apiGet<PaymentSummary>(`${BASE}/payments/summary`, { from, to }),
+);
+export const getInvoiceSummary = (range: DateRange = {}) => invoiceSummary(range.from, range.to);
+export const getPaymentSummary = (range: DateRange = {}) => paymentSummary(range.from, range.to);
 export const getQboCompleteness = () => apiGet<QboCompleteness>(`${BASE}/completeness`);
 export const getCustomerIdentityQuality = () =>
   apiGet<CustomerIdentityQuality>(`${BASE}/customer-identity-quality`);

@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { FinancialOverview, FinancialOverviewSkeleton } from "@/components/sections/FinancialOverview";
-import { DemandAlerts, DemandAlertsSkeleton } from "@/components/sections/DemandAlerts";
+import {
+  FinancialOverview,
+  INVOICE_FILTER_PREFIX,
+  PAYMENT_FILTER_PREFIX,
+} from "@/components/sections/FinancialOverview";
+import { ALERTS_FILTER_PREFIX, DemandAlerts, DemandAlertsSkeleton } from "@/components/sections/DemandAlerts";
+import { DateRangePicker } from "@/components/filters/DateRangePicker";
+import { rangeKey, readDateRange } from "@/lib/filters";
 import { FieldOperationsSnapshot } from "@/components/sections/servicetitan/FieldOperationsSnapshot";
 import { SkeletonCard } from "@/components/ui/States";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -31,7 +37,13 @@ const quickLinks = [
   { href: "/data-quality", label: "Data Quality", description: "QuickBooks sync health & integrity", icon: "wrench" },
 ] as const;
 
-export default function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
+  const sp = await searchParams;
+  const alertsRange = readDateRange(sp, ALERTS_FILTER_PREFIX);
   const topAlerts = flaggedItems.filter((item) => item.status === "open" || item.status === "in_progress").slice(0, 4);
 
   return (
@@ -50,9 +62,10 @@ export default function DashboardPage() {
         }
       />
 
-      <Suspense fallback={<FinancialOverviewSkeleton />}>
-        <FinancialOverview />
-      </Suspense>
+      <FinancialOverview
+        invoiceRange={readDateRange(sp, INVOICE_FILTER_PREFIX)}
+        paymentRange={readDateRange(sp, PAYMENT_FILTER_PREFIX)}
+      />
 
       <div className="mt-6">
         <Suspense fallback={<SkeletonCard />}>
@@ -108,8 +121,11 @@ export default function DashboardPage() {
               </Link>
             }
           />
-          <Suspense fallback={<DemandAlertsSkeleton />}>
-            <DemandAlerts limit={3} />
+          <div className="mb-4">
+            <DateRangePicker prefix={ALERTS_FILTER_PREFIX} range={alertsRange} />
+          </div>
+          <Suspense key={rangeKey(alertsRange)} fallback={<DemandAlertsSkeleton />}>
+            <DemandAlerts limit={3} range={alertsRange} />
           </Suspense>
         </Card>
       </div>

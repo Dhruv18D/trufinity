@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { apiGet, apiGetPage } from "./client";
 import type { DecimalString } from "./reporting";
+import type { DateRange, Department } from "../filters";
 
 export interface CountByLabel {
   label: string;
@@ -143,7 +144,13 @@ const BASE = "/api/reporting/servicetitan";
 // Combined call for initial page loads; memoized per request so several sections share one fetch.
 export const getServiceTitanSummary = cache(() => apiGet<StReportingSnapshot>(`${BASE}/summary`));
 
-export const getStJobsSummary = () => apiGet<StJobsSummary>(`${BASE}/jobs/summary`);
+/** Date + department filterable; omitted params default to month-to-date and "Company" server-side. */
+export const getStJobsSummary = (filters: DateRange & { department?: Department } = {}) =>
+  apiGet<StJobsSummary>(`${BASE}/jobs/summary`, {
+    from: filters.from,
+    to: filters.to,
+    department: filters.department,
+  });
 export const getStInvoicesSummary = () => apiGet<StInvoicesSummary>(`${BASE}/invoices/summary`);
 export const getStArAging = () => apiGet<StArAgingBucket[]>(`${BASE}/invoices/ar-aging`);
 export const getStPaymentsSummary = () => apiGet<StPaymentsSummary>(`${BASE}/payments/summary`);

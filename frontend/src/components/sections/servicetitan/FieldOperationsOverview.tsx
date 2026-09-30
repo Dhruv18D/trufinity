@@ -42,39 +42,10 @@ export async function FieldOperationsOverview() {
       />
     );
   }
-  const { jobs, invoices, arAging, payments, leadsBookings, appointments, customers } = snapshot;
+  const { invoices, arAging, payments, leadsBookings, appointments, customers } = snapshot;
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader
-            title="Jobs"
-            subtitle="ServiceTitan job pipeline"
-            action={<DrillLink href="/field-operations/jobs">View jobs</DrillLink>}
-          />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MetricTile label="Total Jobs" value={formatCount(jobs.totalJobs)} />
-            <MetricTile label="Completed" value={formatCount(jobs.completedJobs)} />
-            <MetricTile label="Completed (30d)" value={formatCount(jobs.completedLast30Days)} />
-            <MetricTile label="Created (30d)" value={formatCount(jobs.createdLast30Days)} />
-            <MetricTile label="Jobs Value" value={formatMoney(jobs.jobsTotalValue)} />
-            <MetricTile label="Recalls" value={formatCount(jobs.recallJobs)} tone={issueTone(jobs.recallJobs)} />
-            <MetricTile label="No-Charge Jobs" value={formatCount(jobs.noChargeJobs)} />
-            <MetricTile
-              label="Completed, Not Invoiced"
-              value={formatCount(jobs.completedNotInvoiced)}
-              tone={jobs.completedNotInvoiced > 0 ? "danger" : "success"}
-              helpText="O-06"
-            />
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title="Jobs by Status" />
-          <CountList items={jobs.byStatus} />
-        </Card>
-      </div>
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader

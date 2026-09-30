@@ -2,12 +2,16 @@ import { EmptyState, ErrorState, SkeletonTable } from "@/components/ui/States";
 import { AlertRow } from "@/components/alerts/AlertRow";
 import { listAlerts, type DetectedAlert } from "@/lib/api/alerts";
 import { getRuleMeta } from "@/lib/rules";
+import type { DateRange } from "@/lib/filters";
 
-/** D-series alerts (D-01 booking rate decline, D-06 objection spike). */
-export async function DemandAlerts({ ruleCode, limit }: { ruleCode?: string; limit?: number }) {
+/** URL param prefix for the alerts date filter (`alertsFrom` / `alertsTo`). */
+export const ALERTS_FILTER_PREFIX = "alerts";
+
+/** D-series alerts (D-01 booking rate decline, D-06 objection spike), default month-to-date. */
+export async function DemandAlerts({ ruleCode, limit, range = {} }: { ruleCode?: string; limit?: number; range?: DateRange }) {
   let alerts: DetectedAlert[];
   try {
-    alerts = await listAlerts(ruleCode);
+    alerts = await listAlerts(ruleCode, range);
   } catch {
     return <ErrorState title="Couldn't load demand alerts" />;
   }
@@ -20,7 +24,7 @@ export async function DemandAlerts({ ruleCode, limit }: { ruleCode?: string; lim
       <EmptyState
         icon="check-circle"
         title="No demand alerts"
-        description={ruleCode ? `No ${ruleCode} exceptions detected.` : "No booking-rate or objection exceptions detected."}
+        description={`${ruleCode ? `No ${ruleCode} exceptions` : "No booking-rate or objection exceptions"} detected in this period.`}
       />
     );
   }

@@ -1,5 +1,6 @@
 import { ApiError, apiGet } from "./client";
 import type { DecimalString } from "./reporting";
+import type { DateRange } from "../filters";
 
 /** One row of the backend `detected_alerts` table (snake_case, as the API returns it). */
 export interface DetectedAlert {
@@ -22,9 +23,9 @@ export interface DetectedAlert {
 
 const BASE = "/api/brief/alerts";
 
-/** Newest first. */
-export function listAlerts(ruleCode?: string): Promise<DetectedAlert[]> {
-  return apiGet<DetectedAlert[]>(BASE, { ruleCode });
+/** Newest first. Omitting the range = month-to-date (backend default). */
+export function listAlerts(ruleCode?: string, range: DateRange = {}): Promise<DetectedAlert[]> {
+  return apiGet<DetectedAlert[]>(BASE, { ruleCode, from: range.from, to: range.to });
 }
 
 /** Null when the alert doesn't exist (backend also 404s for malformed ids). */

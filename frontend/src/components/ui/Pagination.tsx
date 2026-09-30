@@ -60,18 +60,28 @@ export function FilterChips({
   param,
   options,
   active,
+  query = {},
 }: {
   basePath: string;
   param: string;
   options: { value: string; label: string }[];
   active?: string;
+  /** Other params to keep on each chip link (e.g. an active date filter). */
+  query?: Record<string, string | undefined>;
 }) {
+  const href = (value: string | undefined) => {
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(query)) if (v) params.set(k, v);
+    if (value) params.set(param, value);
+    const qs = params.toString();
+    return `${basePath}${qs ? `?${qs}` : ""}`;
+  };
   const chip = (value: string | undefined, label: string) => {
     const isActive = (active ?? "") === (value ?? "");
     return (
       <Link
         key={value ?? "all"}
-        href={value ? `${basePath}?${param}=${encodeURIComponent(value)}` : basePath}
+        href={href(value)}
         className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
           isActive ? "bg-ink text-white" : "bg-surface-muted text-foreground/60 hover:bg-surface-muted/70"
         }`}
