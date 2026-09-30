@@ -13,8 +13,8 @@ import { CountList } from "./CountList";
 /** URL param prefix for the jobs filters (`jobsFrom`, `jobsTo`, `jobsDept`). */
 export const JOBS_FILTER_PREFIX = "jobs";
 
-/** ServiceTitan jobs summary with date (default MTD) and optional department filters (default all). */
-export function JobsSummary({ range, department }: { range: DateRange; department?: Department }) {
+/** ServiceTitan jobs summary with date (default MTD) and department (default "Company") filters. */
+export function JobsSummary({ range, department }: { range: DateRange; department: Department }) {
   return (
     <Card>
       <CardHeader
@@ -30,14 +30,14 @@ export function JobsSummary({ range, department }: { range: DateRange; departmen
         <DepartmentFilter prefix={JOBS_FILTER_PREFIX} value={department} />
         <DateRangePicker prefix={JOBS_FILTER_PREFIX} range={range} />
       </div>
-      <Suspense key={`${department ?? "all"}_${rangeKey(range)}`} fallback={<JobsSummarySkeleton />}>
+      <Suspense key={`${department}_${rangeKey(range)}`} fallback={<JobsSummarySkeleton />}>
         <JobsSummaryBody range={range} department={department} />
       </Suspense>
     </Card>
   );
 }
 
-async function JobsSummaryBody({ range, department }: { range: DateRange; department?: Department }) {
+async function JobsSummaryBody({ range, department }: { range: DateRange; department: Department }) {
   let jobs: StJobsSummary;
   try {
     jobs = await getStJobsSummary({ ...range, department });

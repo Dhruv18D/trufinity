@@ -1,15 +1,10 @@
 "use client";
 
-import { DEPARTMENTS, departmentParamKey, type Department } from "@/lib/filters";
+import { DEFAULT_DEPARTMENT, DEPARTMENTS, departmentParamKey, type Department } from "@/lib/filters";
 import { useUrlParams } from "./useUrlParams";
 
-const OPTIONS: { value?: Department; label: string }[] = [
-  { label: "All" },
-  ...DEPARTMENTS.map((d) => ({ value: d, label: d })),
-];
-
-/** Segmented control over the fixed department list. "All" (the default) sends no department param. */
-export function DepartmentFilter({ prefix, value }: { prefix: string; value?: Department }) {
+/** Segmented control over the fixed department list. The default ("Company") is left out of the URL. */
+export function DepartmentFilter({ prefix, value }: { prefix: string; value: Department }) {
   const { setParams, isPending } = useUrlParams();
 
   return (
@@ -19,20 +14,22 @@ export function DepartmentFilter({ prefix, value }: { prefix: string; value?: De
       aria-busy={isPending}
       className={`inline-flex rounded-lg border border-border-subtle bg-surface-muted/60 p-0.5 ${isPending ? "opacity-70" : ""}`}
     >
-      {OPTIONS.map((opt) => {
-        const active = opt.value === value;
+      {DEPARTMENTS.map((dept) => {
+        const active = dept === value;
         return (
           <button
-            key={opt.label}
+            key={dept}
             type="button"
             role="radio"
             aria-checked={active}
-            onClick={() => !active && setParams({ [departmentParamKey(prefix)]: opt.value })}
+            onClick={() =>
+              !active && setParams({ [departmentParamKey(prefix)]: dept === DEFAULT_DEPARTMENT ? undefined : dept })
+            }
             className={`rounded-md px-3 py-1 text-xs font-medium transition ${
               active ? "bg-surface text-foreground shadow-sm" : "text-foreground/55 hover:text-foreground"
             }`}
           >
-            {opt.label}
+            {dept}
           </button>
         );
       })}

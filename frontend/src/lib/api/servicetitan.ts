@@ -144,7 +144,7 @@ const BASE = "/api/reporting/servicetitan";
 // Combined call for initial page loads; memoized per request so several sections share one fetch.
 export const getServiceTitanSummary = cache(() => apiGet<StReportingSnapshot>(`${BASE}/summary`));
 
-/** Date + department filterable; omitted date = month-to-date, omitted department = all departments. */
+/** Date + department filterable; omitted params default to month-to-date and "Company" server-side. */
 export const getStJobsSummary = (filters: DateRange & { department?: Department } = {}) =>
   apiGet<StJobsSummary>(`${BASE}/jobs/summary`, {
     from: filters.from,
