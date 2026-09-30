@@ -47,23 +47,24 @@ export class KnexServiceTitanReportingRepository {
 
   // Date filters on createdOn (when the job entered the pipeline, not when it
   // closed) - this is a dashboard "activity this period" view. Department
-  // resolves payload->>'businessUnitId' against raw_st_business_units.name;
-  // a job whose business unit hasn't been ingested yet (or has none) is
-  // excluded from every department slice rather than silently miscounted
-  // into "Company" - see business-unit.ingestion.ts.
+  // (optional; omitted = all jobs) resolves payload->>'businessUnitId' against
+  // raw_st_business_units.name; a job whose business unit hasn't been ingested
+  // yet (or has none) is excluded from every department slice rather than
+  // silently miscounted into "Company" - see business-unit.ingestion.ts.
   public async getJobsSummary(
     dateRange: DateRangeFilter = defaultDateRangeFilter(),
-    department: ServiceTitanDepartment = 'Company',
+    department?: ServiceTitanDepartment,
   ): Promise<StJobsSummary> {
     const scoped = `
       SELECT j.payload AS payload
       FROM raw_st_jobs j
-      JOIN raw_st_business_units bu ON bu.is_latest = true AND bu.source_id = j.payload->>'businessUnitId'
+      ${department ? `JOIN raw_st_business_units bu ON bu.is_latest = true AND bu.source_id = j.payload->>'businessUnitId'` : ''}
       WHERE j.is_latest = true
         AND (j.payload->>'createdOn')::timestamptz >= ? AND (j.payload->>'createdOn')::timestamptz < ?
-        AND bu.payload->>'name' = ?
+        ${department ? `AND bu.payload->>'name' = ?` : ''}
     `;
-    const bindings: Knex.RawBinding[] = [dateRange.from.toISOString(), dateRange.to.toISOString(), department];
+    const bindings: Knex.RawBinding[] = [dateRange.from.toISOString(), dateRange.to.toISOString()];
+    if (department) bindings.push(department);
     const [row] = await readRows<Record<string, unknown>>(this.database, `
       WITH scoped AS (${scoped})
       SELECT

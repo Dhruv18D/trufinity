@@ -14,10 +14,9 @@ export interface DateRange {
   to?: string;
 }
 
-/** Fixed list — the backend doesn't return it anywhere. Values must match exactly. */
+/** Fixed list — the backend doesn't return it anywhere. Values must match exactly. Omitted = all departments. */
 export const DEPARTMENTS = ["Company", "Service", "New Construction"] as const;
 export type Department = (typeof DEPARTMENTS)[number];
-export const DEFAULT_DEPARTMENT: Department = "Company";
 
 export const dateParamKeys = (prefix: string) => ({ from: `${prefix}From`, to: `${prefix}To` });
 export const departmentParamKey = (prefix: string) => `${prefix}Dept`;
@@ -45,9 +44,10 @@ export function readDateRange(sp: SearchParams, prefix: string): DateRange {
   return range;
 }
 
-export function readDepartment(sp: SearchParams, prefix: string): Department {
+/** Undefined = no department filter (all jobs). */
+export function readDepartment(sp: SearchParams, prefix: string): Department | undefined {
   const value = first(sp[departmentParamKey(prefix)]);
-  return DEPARTMENTS.find((d) => d === value) ?? DEFAULT_DEPARTMENT;
+  return DEPARTMENTS.find((d) => d === value);
 }
 
 /** Stable string for Suspense keys, so changing a filter shows the loading state. */
