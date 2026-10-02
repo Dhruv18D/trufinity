@@ -21,7 +21,10 @@ export function useUrlParams() {
     }
     params.delete("page");
     const qs = params.toString();
-    startTransition(() => router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false }));
+    const next = `${pathname}${qs ? `?${qs}` : ""}`;
+    // Re-selecting the current value shouldn't trigger a server round-trip.
+    if (next === `${window.location.pathname}${window.location.search}`) return;
+    startTransition(() => router.replace(next, { scroll: false }));
   };
 
   return { setParams, isPending };

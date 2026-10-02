@@ -91,3 +91,43 @@ export function PendingState({ description }: { description?: string }) {
     />
   );
 }
+
+export function Spinner({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Route-level loading UI (loading.tsx): page header plus a cards or table body. */
+export function PageSkeleton({ variant = "cards" }: { variant?: "cards" | "table" | "detail" }) {
+  return (
+    <div role="status" aria-label="Loading">
+      <div className="mb-6">
+        <Skeleton className="h-6 w-56" />
+        <Skeleton className="mt-3 h-4 w-80 max-w-full" />
+      </div>
+      {variant === "cards" && (
+        <>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <SkeletonCard key={i} />
+            ))}
+          </div>
+          <div className="mt-6">
+            <SkeletonTable rows={4} />
+          </div>
+        </>
+      )}
+      {variant === "table" && (
+        <>
+          <Skeleton className="mb-5 h-8 w-80 max-w-full rounded-full" />
+          <SkeletonTable rows={8} />
+        </>
+      )}
+      {variant === "detail" && <SkeletonTable rows={6} />}
+    </div>
+  );
+}

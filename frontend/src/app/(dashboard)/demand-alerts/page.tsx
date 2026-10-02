@@ -4,20 +4,15 @@ import { Card } from "@/components/ui/Card";
 import { FilterChips } from "@/components/ui/Pagination";
 import { DateRangePicker } from "@/components/filters/DateRangePicker";
 import { ALERTS_FILTER_PREFIX, DemandAlerts, DemandAlertsSkeleton } from "@/components/sections/DemandAlerts";
-import { dateParamKeys, rangeKey, readDateRange } from "@/lib/filters";
+import { dateParamKeys, firstParam, rangeKey, readDateRange, type SearchParams } from "@/lib/filters";
 import { rulesForSection } from "@/lib/rules";
 
 const BASE_PATH = "/demand-alerts";
 
-export default async function DemandAlertsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
+export default async function DemandAlertsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
-  const raw = sp.ruleCode;
   const demandRules = rulesForSection("demand");
-  const ruleCode = demandRules.find((r) => r.code === (Array.isArray(raw) ? raw[0] : raw))?.code;
+  const ruleCode = demandRules.find((r) => r.code === firstParam(sp.ruleCode))?.code;
   const range = readDateRange(sp, ALERTS_FILTER_PREFIX);
   const dateKeys = dateParamKeys(ALERTS_FILTER_PREFIX);
 

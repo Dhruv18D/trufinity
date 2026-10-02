@@ -5,6 +5,7 @@ import { MetricTile, issueTone } from "@/components/sections/MetricTile";
 import { getServiceTitanSummary, type StArAgingBucketId, type StReportingSnapshot } from "@/lib/api/servicetitan";
 import { formatCount, formatMoney } from "@/lib/format";
 import { CountList } from "./CountList";
+import { LinkPending } from "@/components/ui/LinkPending";
 
 const agingLabels: Record<StArAgingBucketId, string> = {
   CURRENT: "Current",
@@ -24,8 +25,9 @@ const agingTone: Record<StArAgingBucketId, string> = {
 
 function DrillLink({ href, children }: { href: string; children: string }) {
   return (
-    <Link href={href} className="text-xs font-medium text-teal-dark hover:underline">
+    <Link href={href} className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-dark hover:underline">
       {children}
+      <LinkPending className="h-3 w-3" />
     </Link>
   );
 }

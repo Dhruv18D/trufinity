@@ -1,9 +1,10 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
-import { EmptyState, ErrorState } from "@/components/ui/States";
-import { FilterChips, Pagination } from "@/components/ui/Pagination";
+import { EmptyState, ErrorState, SkeletonTable } from "@/components/ui/States";
+import { FilterChips, PageOutOfRange, Pagination, lastPageOf } from "@/components/ui/Pagination";
 import {
   listStInvoices,
   ST_INVOICE_CLASSIFICATIONS,
@@ -13,8 +14,9 @@ import {
 } from "@/lib/api/servicetitan";
 import type { Paginated } from "@/lib/api/client";
 import { formatDate, formatEnumLabel, formatMoney } from "@/lib/format";
+import { firstParam, readPage, type SearchParams } from "@/lib/filters";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = Math.min(25, ST_MAX_PAGE_SIZE);
 const BASE_PATH = "/field-operations/invoices";
 
 const classificationStyles: Record<StInvoiceClassification, string> = {
@@ -24,10 +26,6 @@ const classificationStyles: Record<StInvoiceClassification, string> = {
   ZERO_VALUE: "bg-surface-muted text-foreground/60",
 };
 
-function firstParam(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
 function parseClassification(value: string | undefined): StInvoiceClassification | undefined {
   const upper = value?.toUpperCase();
   return (ST_INVOICE_CLASSIFICATIONS as readonly string[]).includes(upper ?? "")
@@ -35,21 +33,10 @@ function parseClassification(value: string | undefined): StInvoiceClassification
     : undefined;
 }
 
-export default async function StInvoicesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
+export default async function StInvoicesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const classification = parseClassification(firstParam(sp.classification));
-  const page = Math.max(1, Number(firstParam(sp.page)) || 1);
-
-  let result: Paginated<StInvoiceListItem> | null = null;
-  try {
-    result = await listStInvoices({ page, pageSize: Math.min(PAGE_SIZE, ST_MAX_PAGE_SIZE), classification });
-  } catch {
-    result = null;
-  }
+  const page = readPage(sp);
 
   return (
     <div>
@@ -65,10 +52,32 @@ export default async function StInvoicesPage({
         options={ST_INVOICE_CLASSIFICATIONS.map((c) => ({ value: c, label: formatEnumLabel(c) }))}
       />
 
-      {!result ? (
-        <ErrorState title="Couldn't load invoices" />
-      ) : result.data.length === 0 ? (
-        <EmptyState title="No invoices found" />
+      <Suspense key={`${classification ?? "all"}_${page}`} fallback={<SkeletonTable rows={8} />}>
+        <InvoicesResults classification={classification} page={page} />
+      </Suspense>
+    </div>
+  );
+}
+
+async function InvoicesResults({ classification, page }: { classification?: StInvoiceClassification; page: number }) {
+  let result: Paginated<StInvoiceListItem>;
+  try {
+    result = await listStInvoices({ page, pageSize: PAGE_SIZE, classification });
+  } catch {
+    return <ErrorState title="Couldn't load invoices" />;
+  }
+  const lastPage = lastPageOf(result.totalCount, result.pageSize);
+  if (result.data.length === 0 && result.totalCount > 0 && page > lastPage) {
+    return <PageOutOfRange basePath={BASE_PATH} query={{ classification }} lastPage={lastPage} />;
+  }
+
+  return (
+    <>
+      {result.data.length === 0 ? (
+        <EmptyState
+          title="No invoices found"
+          description={classification ? `No invoices classified “${formatEnumLabel(classification)}”.` : undefined}
+        />
       ) : (
         <Card padded={false}>
           <div className="overflow-x-auto">
@@ -114,6 +123,6 @@ export default async function StInvoicesPage({
           />
         </Card>
       )}
-    </div>
+    </>
   );
 }

@@ -6,7 +6,7 @@ import { BUSINESS_TIMEZONE } from "./format";
  * same page filter independently.
  */
 
-type SearchParams = Record<string, string | string[] | undefined>;
+export type SearchParams = Record<string, string | string[] | undefined>;
 
 /** ISO dates (YYYY-MM-DD). Both omitted = month-to-date, the backend default. */
 export interface DateRange {
@@ -23,9 +23,21 @@ export const departmentParamKey = (prefix: string) => `${prefix}Dept`;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function first(value: string | string[] | undefined): string | undefined {
+export function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
+
+/** 1-based page number from `?page=`; anything missing or invalid is page 1. */
+export function readPage(sp: SearchParams): number {
+  const page = Math.floor(Number(firstParam(sp.page)));
+  return Number.isFinite(page) && page > 1 ? page : 1;
+}
+
+/**
+ * Explicit "everything" range for lookups that must not follow the MTD default
+ * (e.g. the list of job statuses used as filter chips).
+ */
+export const ALL_TIME_RANGE: DateRange = { from: "2000-01-01" };
 
 export function isIsoDate(value: string | undefined): value is string {
   return !!value && ISO_DATE.test(value) && !Number.isNaN(Date.parse(value));
@@ -33,8 +45,8 @@ export function isIsoDate(value: string | undefined): value is string {
 
 export function readDateRange(sp: SearchParams, prefix: string): DateRange {
   const keys = dateParamKeys(prefix);
-  const from = first(sp[keys.from]);
-  const to = first(sp[keys.to]);
+  const from = firstParam(sp[keys.from]);
+  const to = firstParam(sp[keys.to]);
   const range: DateRange = {
     from: isIsoDate(from) ? from : undefined,
     to: isIsoDate(to) ? to : undefined,
@@ -46,7 +58,7 @@ export function readDateRange(sp: SearchParams, prefix: string): DateRange {
 
 /** Undefined = no department filter (all jobs). */
 export function readDepartment(sp: SearchParams, prefix: string): Department | undefined {
-  const value = first(sp[departmentParamKey(prefix)]);
+  const value = firstParam(sp[departmentParamKey(prefix)]);
   return DEPARTMENTS.find((d) => d === value);
 }
 

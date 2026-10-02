@@ -1,34 +1,29 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Pill } from "@/components/ui/Badge";
 import { Icon } from "@/components/ui/Icon";
-import { EmptyState, ErrorState } from "@/components/ui/States";
-import { FilterChips, Pagination } from "@/components/ui/Pagination";
-import { getStJobsSummary, listStJobs, ST_MAX_PAGE_SIZE, type StJobListItem } from "@/lib/api/servicetitan";
+import { EmptyState, ErrorState, Skeleton, SkeletonTable } from "@/components/ui/States";
+import { FilterChips, PageOutOfRange, Pagination, lastPageOf } from "@/components/ui/Pagination";
+import {
+  getStJobsSummary,
+  listStJobs,
+  ST_MAX_PAGE_SIZE,
+  type CountByLabel,
+  type StJobListItem,
+} from "@/lib/api/servicetitan";
+import { ALL_TIME_RANGE, firstParam, readPage, type SearchParams } from "@/lib/filters";
 import type { Paginated } from "@/lib/api/client";
 import { formatDate, formatEnumLabel, formatMoney } from "@/lib/format";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = Math.min(25, ST_MAX_PAGE_SIZE);
 const BASE_PATH = "/field-operations/jobs";
 
-function firstParam(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-export default async function StJobsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
+export default async function StJobsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const status = firstParam(sp.status) || undefined;
-  const page = Math.max(1, Number(firstParam(sp.page)) || 1);
-
-  const [statuses, result] = await Promise.allSettled([
-    getStJobsSummary(),
-    listStJobs({ page, pageSize: Math.min(PAGE_SIZE, ST_MAX_PAGE_SIZE), status }),
-  ]);
+  const page = readPage(sp);
 
   return (
     <div>
@@ -37,22 +32,52 @@ export default async function StJobsPage({
       </Link>
       <PageHeader title="Jobs" description="ServiceTitan jobs, newest first. Filter by status to drill down." />
 
-      {statuses.status === "fulfilled" && (
-        <FilterChips
-          basePath={BASE_PATH}
-          param="status"
-          active={status}
-          options={statuses.value.byStatus.map((s) => ({ value: s.label, label: formatEnumLabel(s.label) }))}
-        />
-      )}
+      {/* Chips and table load independently, so a slow summary never holds up the list. */}
+      <Suspense fallback={<Skeleton className="mb-5 h-8 w-80 rounded-full" />}>
+        <StatusChips status={status} />
+      </Suspense>
 
-      {result.status === "rejected" ? (
-        <ErrorState title="Couldn't load jobs" />
-      ) : (
-        <JobsTable result={result.value} status={status} />
-      )}
+      <Suspense key={`${status ?? "all"}_${page}`} fallback={<SkeletonTable rows={8} />}>
+        <JobsResults status={status} page={page} />
+      </Suspense>
     </div>
   );
+}
+
+async function StatusChips({ status }: { status?: string }) {
+  let statuses: CountByLabel[];
+  try {
+    // All-time: the list below isn't date-filtered, so chips mustn't follow the MTD default.
+    statuses = (await getStJobsSummary(ALL_TIME_RANGE)).byStatus;
+  } catch {
+    statuses = [];
+  }
+  // Keep the active status selectable even if the summary didn't return it.
+  if (status && !statuses.some((s) => s.label === status)) statuses = [...statuses, { label: status, count: 0 }];
+  if (statuses.length === 0) return null;
+
+  return (
+    <FilterChips
+      basePath={BASE_PATH}
+      param="status"
+      active={status}
+      options={statuses.map((s) => ({ value: s.label, label: formatEnumLabel(s.label) }))}
+    />
+  );
+}
+
+async function JobsResults({ status, page }: { status?: string; page: number }) {
+  let result: Paginated<StJobListItem>;
+  try {
+    result = await listStJobs({ page, pageSize: PAGE_SIZE, status });
+  } catch {
+    return <ErrorState title="Couldn't load jobs" />;
+  }
+  const lastPage = lastPageOf(result.totalCount, result.pageSize);
+  if (result.data.length === 0 && result.totalCount > 0 && page > lastPage) {
+    return <PageOutOfRange basePath={BASE_PATH} query={{ status }} lastPage={lastPage} />;
+  }
+  return <JobsTable result={result} status={status} />;
 }
 
 function JobsTable({ result, status }: { result: Paginated<StJobListItem>; status?: string }) {

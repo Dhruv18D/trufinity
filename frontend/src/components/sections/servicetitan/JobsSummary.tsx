@@ -9,6 +9,7 @@ import { getStJobsSummary, type StJobsSummary } from "@/lib/api/servicetitan";
 import { rangeKey, type DateRange, type Department } from "@/lib/filters";
 import { formatCount, formatMoney } from "@/lib/format";
 import { CountList } from "./CountList";
+import { LinkPending } from "@/components/ui/LinkPending";
 
 /** URL param prefix for the jobs filters (`jobsFrom`, `jobsTo`, `jobsDept`). */
 export const JOBS_FILTER_PREFIX = "jobs";
@@ -21,8 +22,12 @@ export function JobsSummary({ range, department }: { range: DateRange; departmen
         title="Jobs"
         subtitle="ServiceTitan job pipeline"
         action={
-          <Link href="/field-operations/jobs" className="text-xs font-medium text-teal-dark hover:underline">
+          <Link
+            href="/field-operations/jobs"
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-teal-dark hover:underline"
+          >
             View jobs
+            <LinkPending className="h-3 w-3" />
           </Link>
         }
       />
