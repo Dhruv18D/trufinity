@@ -8,15 +8,15 @@ import { formatCount, formatMoney } from "@/lib/format";
 export async function TechnicianSummary() {
   // Role check happens before any data is read, so restricted viewers never receive it.
   if (!(await canViewConfidential())) {
-    return (
-      <Card>
-        <CardHeader title="Technician Performance" subtitle="Jobs sold and sold value per technician" />
-        <EmptyState
-          icon="lock"
-          title="Restricted"
-          description="Technician sales data is confidential and only visible to the owner."
-        />
-      </Card>
+    return (''
+      // <Card>
+      //   <CardHeader title="Technician Performance" subtitle="Jobs sold and sold value per technician" />
+      //   <EmptyState
+      //     icon="lock"
+      //     title="Restricted"
+      //     description="Technician sales data is confidential and only visible to the owner."
+      //   />
+      // </Card>
     );
   }
 
