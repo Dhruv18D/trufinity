@@ -34,6 +34,10 @@ export class NarrativeValidationError extends Error {
 const RULE_DESCRIPTIONS: Record<string, string> = {
   'D-01': 'Tenant-wide call booking rate has declined compared to the trailing 4-week average.',
   'D-06': 'An objection category mentioned on calls has spiked compared to its trailing 4-week average.',
+  'F-04': 'The share of recently-issued invoices that are now overdue and unpaid has risen compared to the trailing 4-week cohort average.',
+  'F-04c': "A single customer's outstanding receivable balance makes up an outsized share of total outstanding accounts receivable.",
+  'F-03': 'The aggregate discount rate on recently-issued QuickBooks invoices has risen compared to the trailing 4-week average.',
+  'F-04d': 'The total dollar amount of QuickBooks credit memos issued in the current week has spiked compared to the trailing 4-week weekly average.',
 };
 
 // Percentage-rate rules whose metric/baseline values are stored as fractions
@@ -41,7 +45,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
 // means the model copies a number we already computed - it never does the
 // fraction-to-percent arithmetic itself (SPEC-BI-001 Section 9: the model
 // performs no arithmetic).
-const PERCENTAGE_RULES = new Set(['D-01', 'D-06']);
+const PERCENTAGE_RULES = new Set(['D-01', 'D-06', 'F-04', 'F-04c', 'F-03']);
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;

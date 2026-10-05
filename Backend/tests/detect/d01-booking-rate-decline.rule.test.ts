@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll } from '@jest/globals';
 import { randomUUID } from 'crypto';
 import { db } from '../../src/database';
 import { evaluateBookingRateDecline } from '../../src/modules/detect/rules/d01-booking-rate-decline.rule';
@@ -29,6 +29,11 @@ function callRow(receivedAt: Date, booked: boolean, csr: string | null = null) {
 describe('evaluateBookingRateDecline (D-01)', () => {
   beforeEach(async () => {
     await db('canonical_lace_calls').where('received_at', '>=', '2099-05-01').andWhere('received_at', '<', '2099-07-01').delete();
+  });
+
+  afterAll(async () => {
+    await db('canonical_lace_calls').where('received_at', '>=', '2099-05-01').andWhere('received_at', '<', '2099-07-01').delete();
+    await db.destroy();
   });
 
   it('flags a tenant-wide decline that meets the threshold, with the current and baseline rates as metric/baseline values', async () => {

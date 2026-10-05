@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll } from '@jest/globals';
 import request from 'supertest';
 import app from '../../src/app';
 import { db } from '../../src/database';
@@ -28,6 +28,12 @@ function insertAlert(overrides: Partial<Record<string, unknown>> = {}) {
     })
     .returning('id');
 }
+
+// File-level (not per-describe) so it runs once, after every test below.
+afterAll(async () => {
+  await db('detected_alerts').where('period_start', '>=', YEAR_START).andWhere('period_start', '<', YEAR_END).delete();
+  await db.destroy();
+});
 
 interface AlertBody {
   id: string;

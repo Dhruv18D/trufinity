@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, jest } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll, jest } from '@jest/globals';
 import { db } from '../../src/database';
 import { QboCompanyInfoIngestionService } from '../../src/modules/quickbooks/ingestion/companyinfo.ingestion';
 
@@ -6,6 +6,12 @@ describe('QBO CompanyInfo raw ingestion', () => {
   beforeEach(async () => {
     await db('raw_qbo_companyinfo').delete();
     await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'CompanyInfo' }).delete();
+  });
+
+  afterAll(async () => {
+    await db('raw_qbo_companyinfo').delete();
+    await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'CompanyInfo' }).delete();
+    await db.destroy();
   });
 
   it('persists the complete payload and tracks a full refresh', async () => {

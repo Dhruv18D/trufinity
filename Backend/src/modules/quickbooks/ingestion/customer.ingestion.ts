@@ -95,7 +95,7 @@ export class QboCustomerIngestionService {
           for (const record of valid) { await trx('raw_qbo_customers').where({ source_id: record.id, is_latest: true }).update({ is_latest: false }); await trx('raw_qbo_customers').insert({ source_id: record.id, payload: record.payload, is_latest: true, sync_run_id: runId }); }
           if (invalid.length) await trx('sync_errors').insert(invalid.map((payload) => ({ sync_run_id: runId, source_id: null, error_message: 'Customer payload is missing a valid Id.', payload })));
         });
-        processed += valid.length; const max = page.maxResults ?? PAGE_SIZE; hasMore = page.totalCount !== undefined ? position + customers.length <= page.totalCount : customers.length === max;
+        processed += valid.length; const max = page.maxResults ?? PAGE_SIZE; const pageWasFull = customers.length === max; hasMore = pageWasFull && max === PAGE_SIZE ? true : page.totalCount !== undefined ? position + customers.length <= page.totalCount : pageWasFull;
         position += customers.length;
         stage = 'advance_pagination_metadata';
         await this.database('raw_sync_metadata').insert({ source_system: 'QuickBooks', entity_type: 'Customers', continuation_token: hasMore ? String(position) : null, last_synced_at: this.database.fn.now() }).onConflict(['source_system', 'entity_type']).merge({ continuation_token: hasMore ? String(position) : null, last_synced_at: this.database.fn.now() });

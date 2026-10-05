@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterAll, jest } from '@jest/globals';
 import { db } from '../../src/database';
 import { logger } from '../../src/utils/logger';
 import { QboCustomerIngestionService } from '../../src/modules/quickbooks/ingestion/customer.ingestion';
 
 describe('QBO Customer raw ingestion', () => {
   beforeEach(async () => { await db('raw_qbo_customers').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Customers' }).delete(); });
+  afterAll(async () => { await db('raw_qbo_customers').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Customers' }).delete(); await db.destroy(); });
   it('loads all pages and preserves payloads/versioning', async () => {
     const api = { getCustomersPage: jest.fn<(position: number, size: number) => Promise<any>>()
       .mockResolvedValueOnce({ QueryResponse: { Customer: [{ Id: '1', DisplayName: 'A' }], totalCount: 2, maxResults: 1 }, time: 't' })

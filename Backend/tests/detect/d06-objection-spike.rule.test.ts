@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll } from '@jest/globals';
 import { randomUUID } from 'crypto';
 import { db } from '../../src/database';
 import { evaluateObjectionCategorySpikes } from '../../src/modules/detect/rules/d06-objection-spike.rule';
@@ -29,6 +29,11 @@ function callRow(receivedAt: Date, objections: string[] | null) {
 describe('evaluateObjectionCategorySpikes (D-06)', () => {
   beforeEach(async () => {
     await db('canonical_lace_calls').where('received_at', '>=', '2098-05-01').andWhere('received_at', '<', '2098-07-01').delete();
+  });
+
+  afterAll(async () => {
+    await db('canonical_lace_calls').where('received_at', '>=', '2098-05-01').andWhere('received_at', '<', '2098-07-01').delete();
+    await db.destroy();
   });
 
   it('flags a category whose current share of unbooked calls is at least the threshold multiple of its baseline share', async () => {

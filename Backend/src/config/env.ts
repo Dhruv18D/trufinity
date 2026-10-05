@@ -103,6 +103,27 @@ const envSchema = z.object({
   // this many times its trailing 4-week weekly average (min sample size below).
   DETECT_D06_OBJECTION_SPIKE_MULTIPLIER: z.coerce.number().default(2),
   DETECT_D06_OBJECTION_MIN_SAMPLE: z.coerce.number().default(3),
+  // F-04: alert when the share of invoices (QuickBooks or ServiceTitan) issued
+  // in the current 7-day cohort that are now overdue-and-unpaid rises at least
+  // this many percentage points above the trailing 4-week cohort average.
+  DETECT_F04_AR_OVERDUE_RATE_INCREASE_THRESHOLD_POINTS: z.coerce.number().default(10),
+  DETECT_F04_AR_MIN_SAMPLE: z.coerce.number().default(5),
+  // F-03: alert when the aggregate discount-to-gross rate on QuickBooks
+  // invoices issued in the current 7-day window rises at least this many
+  // percentage points above the trailing 4-week average.
+  DETECT_F03_DISCOUNT_RATE_INCREASE_THRESHOLD_POINTS: z.coerce.number().default(5),
+  DETECT_F03_DISCOUNT_MIN_SAMPLE: z.coerce.number().default(5),
+  // F-04c: alert when a single customer's outstanding QuickBooks AR balance
+  // is at least this many percentage points of total outstanding AR. Only
+  // evaluated once total outstanding AR is at least this dollar amount
+  // (guards against a tiny AR book making one customer look "concentrated").
+  DETECT_F04C_AR_CONCENTRATION_THRESHOLD_POINTS: z.coerce.number().default(25),
+  DETECT_F04C_AR_MIN_OUTSTANDING: z.coerce.number().default(1000),
+  // F-04d: alert when the current 7-day total QuickBooks credit-memo dollar
+  // amount issued is at least this many times the trailing 4-week weekly
+  // average (min sample count below avoids flagging a single small memo).
+  DETECT_F04D_CREDITMEMO_SPIKE_MULTIPLIER: z.coerce.number().default(2),
+  DETECT_F04D_CREDITMEMO_MIN_SAMPLE: z.coerce.number().default(3),
 
   // Narrate layer: LLM writes prose describing detected_alerts findings only -
   // it never recomputes numbers (SPEC-BI-001 Section 4.1).
@@ -138,6 +159,17 @@ const _env = productionEnvSchema.safeParse(process.env);
 if (!_env.success) {
   console.error('? Invalid environment variables:', _env.error.format());
   process.exit(1);
+}
+
+// Hard guard: tests must never be able to connect to a non-test database.
+// See tests/jest.setup-env.js, which forces DB_NAME onto an isolated DB
+// before this file loads .env - this throw is the backstop if that override
+// is ever bypassed or misconfigured.
+if (_env.data.NODE_ENV === 'test' && !_env.data.DB_NAME.endsWith('_test')) {
+  throw new Error(
+    `Refusing to run with NODE_ENV=test against database "${_env.data.DB_NAME}" - DB_NAME must end in "_test" ` +
+    'to prevent tests from writing to a real database. See tests/jest.setup-env.js.',
+  );
 }
 
 export const env = _env.data;

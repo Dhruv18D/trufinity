@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll } from '@jest/globals';
 import { randomUUID } from 'crypto';
 import { db } from '../../src/database';
 import { DetectService } from '../../src/modules/detect/detect.service';
@@ -24,6 +24,12 @@ describe('DetectService', () => {
     // Bounded to this file's own year: other test files share this table concurrently.
     await db('detected_alerts').where('period_start', '>=', '2097-01-01').andWhere('period_start', '<', '2098-01-01').delete();
     await db('canonical_lace_calls').where('received_at', '>=', '2097-05-01').andWhere('received_at', '<', '2097-07-01').delete();
+  });
+
+  afterAll(async () => {
+    await db('detected_alerts').where('period_start', '>=', '2097-01-01').andWhere('period_start', '<', '2098-01-01').delete();
+    await db('canonical_lace_calls').where('received_at', '>=', '2097-05-01').andWhere('received_at', '<', '2097-07-01').delete();
+    await db.destroy();
   });
 
   it('persists findings from both rules and returns them', async () => {

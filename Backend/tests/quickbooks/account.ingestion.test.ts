@@ -1,9 +1,10 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterAll, jest } from '@jest/globals';
 import { db } from '../../src/database';
 import { QboAccountIngestionService } from '../../src/modules/quickbooks/ingestion/account.ingestion';
 
 describe('QBO Account raw ingestion', () => {
   beforeEach(async () => { await db('raw_qbo_accounts').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Accounts' }).delete(); });
+  afterAll(async () => { await db('raw_qbo_accounts').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Accounts' }).delete(); await db.destroy(); });
   it('loads paginated accounts and persists source IDs', async () => {
     const api = { getAccountsPage: jest.fn<(position: number, size: number) => Promise<any>>()
       .mockResolvedValueOnce({ QueryResponse: { Account: [{ Id: '1', Name: 'Cash' }], totalCount: 2, maxResults: 1 }, time: 't' })

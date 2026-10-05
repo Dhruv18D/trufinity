@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterEach, afterAll } from '@jest/globals';
 import { db } from '../../src/database';
 import { PostgresCallAnalysisRawRepository, LaceCallAnalysisIngestionService } from '../../src/modules/lace/ingestion/call-analysis.ingestion';
 import type { LaceObjectStore } from '../../src/modules/lace/s3.client';
@@ -51,6 +51,10 @@ describe('Lace raw ingestion idempotency (real Postgres repository)', () => {
     await db('lace_ingested_files').where({ export_type: 'call_analysis' }).andWhere('s3_key', 'like', 'idempotency-test/%').delete();
     await db('raw_lace_call_analysis').where('source_id', 'like', 'idem-%').delete();
     if (createdSyncRunIds.length > 0) await db('sync_runs').whereIn('id', createdSyncRunIds).delete();
+  });
+
+  afterAll(async () => {
+    await db.destroy();
   });
 
   it('does not reprocess the same file+ETag twice (re-run produces the same final state)', async () => {

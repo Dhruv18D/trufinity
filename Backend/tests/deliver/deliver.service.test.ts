@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll } from '@jest/globals';
 import { db } from '../../src/database';
 import { DeliverService } from '../../src/modules/deliver/deliver.service';
 
@@ -29,6 +29,12 @@ describe('DeliverService', () => {
   beforeEach(async () => {
     // Bounded to this file's own year: other test files share this table concurrently.
     await db('detected_alerts').where('period_start', '>=', '2095-01-01').andWhere('period_start', '<', '2096-01-01').delete();
+  });
+
+  afterAll(async () => {
+    // Leaves the last test's rows cleaned up too, not just between tests.
+    await db('detected_alerts').where('period_start', '>=', '2095-01-01').andWhere('period_start', '<', '2096-01-01').delete();
+    await db.destroy();
   });
 
   it('lists alerts newest-first', async () => {

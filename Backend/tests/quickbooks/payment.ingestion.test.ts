@@ -1,9 +1,12 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterAll, jest } from '@jest/globals';
 import { db } from '../../src/database';
 import { QboPaymentIngestionService } from '../../src/modules/quickbooks/ingestion/payment.ingestion';
 
 describe('QBO Payment raw ingestion', () => {
   beforeEach(async () => { await db('raw_qbo_payments').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Payments' }).delete(); });
+  // Matches what beforeEach already deletes, so the last test's rows don't
+  // linger, then closes the connection pool so Jest can exit cleanly.
+  afterAll(async () => { await db('raw_qbo_payments').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'Payments' }).delete(); await db.destroy(); });
   it('loads paginated payments and preserves payloads', async () => {
     const api = { getPaymentsPage: jest.fn<(position: number, size: number) => Promise<any>>()
       .mockResolvedValueOnce({ QueryResponse: { Payment: [{ Id: '1', TotalAmt: 10 }], totalCount: 2, maxResults: 1 }, time: 't' })

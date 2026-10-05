@@ -7,6 +7,7 @@ export interface QboQueryResponse<T> {
     Invoice?: T[];
     Payment?: T[];
     Account?: T[];
+    CreditMemo?: T[];
   };
   time: string;
 }
@@ -165,6 +166,33 @@ export interface QboPayment {
     value: string;
     name?: string;
   };
+}
+
+export interface QboCreditMemo {
+  domain?: string;
+  sparse?: boolean;
+  Id?: string;
+  SyncToken?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  MetaData?: any;
+  DocNumber?: string;
+  TxnDate?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  CurrencyRef?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Line?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  TxnTaxDetail?: any;
+  CustomerRef?: {
+    value: string;
+    name?: string;
+  };
+  TotalAmt?: number;
+  // Unapplied/unused credit remaining on this memo - the credit-memo
+  // equivalent of an invoice's Balance.
+  RemainingCredit?: number;
+  PrintStatus?: string;
+  EmailStatus?: string;
 }
 
 export interface QboAccount {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterAll } from '@jest/globals';
 import { db } from '../../src/database';
 import { CallAnalysisCanonicalService } from '../../src/modules/lace/canonical/call-analysis.canonical.service';
 
@@ -6,6 +6,12 @@ describe('CallAnalysisCanonicalService', () => {
   beforeEach(async () => {
     await db('canonical_lace_calls').delete();
     await db('raw_lace_call_analysis').delete();
+  });
+
+  afterAll(async () => {
+    await db('canonical_lace_calls').delete();
+    await db('raw_lace_call_analysis').delete();
+    await db.destroy();
   });
 
   it('maps only is_latest raw rows into typed canonical columns', async () => {

@@ -7,6 +7,7 @@ import { qboCustomerService } from './services/customer.service';
 import { qboInvoiceService } from './services/invoice.service';
 import { qboPaymentService } from './services/payment.service';
 import { qboAccountService } from './services/account.service';
+import { qboCreditMemoService } from './services/creditmemo.service';
 import { logger } from '../../utils/logger';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -179,6 +180,16 @@ router.get('/accounts', async (req, res, next) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 5;
     const data = await qboAccountService.getAccounts(limit);
+    res.json({ status: 'success', limit, count: data.length, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/creditmemos', async (req, res, next) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 5;
+    const data = await qboCreditMemoService.getCreditMemos(limit);
     res.json({ status: 'success', limit, count: data.length, data });
   } catch (err) {
     next(err);

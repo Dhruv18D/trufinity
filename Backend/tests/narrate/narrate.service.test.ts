@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, jest } from '@jest/globals';
+import { describe, expect, it, beforeEach, afterAll, jest } from '@jest/globals';
 import { db } from '../../src/database';
 import {
   NarrateService,
@@ -32,6 +32,12 @@ function insertAlert(overrides: Partial<Record<string, unknown>> = {}) {
 function extractId(row: unknown): string {
   return typeof row === 'object' && row !== null && 'id' in row ? String((row as { id: unknown }).id) : String(row);
 }
+
+// File-level so it runs once, after every describe block below.
+afterAll(async () => {
+  await db('detected_alerts').where('period_start', '>=', '2096-01-01').andWhere('period_start', '<', '2097-01-01').delete();
+  await db.destroy();
+});
 
 // NarrateService.run() intentionally operates on the whole detected_alerts
 // table (it must narrate every pending alert in production, not a filtered
