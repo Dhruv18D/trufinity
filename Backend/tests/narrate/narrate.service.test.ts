@@ -219,4 +219,22 @@ describe('findUnverifiedNumbers', () => {
 
     expect(findUnverifiedNumbers(narrative, payload)).toEqual([]);
   });
+
+  it('reads a thousands-grouped number whole instead of splitting it on the comma', () => {
+    // Reproduces a real failure: D-06's baselineTotalUnbooked = 1091 rendered
+    // as "1,091" in the narrative. The old number regex matched "1" and "91"
+    // as two separate numbers - neither exists in the payload, so a valid
+    // narrative was wrongly rejected every day Detect wrote a new row.
+    const payload = { currentCount: 3, baselineCount: 4, currentTotalUnbooked: 195, baselineTotalUnbooked: 1091 };
+    const narrative = 'That is 3 mentions out of 195 calls, versus 4 out of 1,091 in the baseline.';
+
+    expect(findUnverifiedNumbers(narrative, payload)).toEqual([]);
+  });
+
+  it('still flags a thousands-grouped number that does not appear in the payload', () => {
+    const payload = { baselineTotalUnbooked: 1091 };
+    const narrative = 'Out of 2,500 calls.';
+
+    expect(findUnverifiedNumbers(narrative, payload)).toEqual([2500]);
+  });
 });

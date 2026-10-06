@@ -38,6 +38,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'F-04c': "A single customer's outstanding receivable balance makes up an outsized share of total outstanding accounts receivable.",
   'F-03': 'The aggregate discount rate on recently-issued QuickBooks invoices has risen compared to the trailing 4-week average.',
   'F-04d': 'The total dollar amount of QuickBooks credit memos issued in the current week has spiked compared to the trailing 4-week weekly average.',
+  'F-05': "ServiceTitan's and QuickBooks' recorded revenue for the current week's invoices diverge by more than the configured threshold.",
 };
 
 // Percentage-rate rules whose metric/baseline values are stored as fractions
@@ -45,7 +46,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
 // means the model copies a number we already computed - it never does the
 // fraction-to-percent arithmetic itself (SPEC-BI-001 Section 9: the model
 // performs no arithmetic).
-const PERCENTAGE_RULES = new Set(['D-01', 'D-06', 'F-04', 'F-04c', 'F-03']);
+const PERCENTAGE_RULES = new Set(['D-01', 'D-06', 'F-04', 'F-04c', 'F-03', 'F-05']);
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
@@ -106,7 +107,7 @@ function collectAllowedNumbers(payload: Record<string, unknown>): Set<number> {
       // The model reasonably echoes these back, so they must count as
       // allowed too - otherwise validation fails unpredictably depending on
       // whether the model happens to write a window size etc. as a digit.
-      for (const match of value.match(/-?\d+(\.\d+)?/g) ?? []) allowed.add(Number(match));
+      for (const match of extractNumbers(value)) allowed.add(match);
       return;
     }
     if (Array.isArray(value)) {
@@ -122,9 +123,15 @@ function collectAllowedNumbers(payload: Record<string, unknown>): Set<number> {
   return allowed;
 }
 
+// Thousands-grouped numbers (e.g. "1,091") must be matched whole, before the
+// plain-number alternative - otherwise a greedy single-digit-group match
+// would read "1,091" as two separate numbers, 1 and 91, and the real value
+// 1091 would never appear in either the narrative or the allowed set.
+const NUMBER_PATTERN = /-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?/g;
+
 function extractNumbers(text: string): number[] {
-  const matches = text.match(/-?\d+(\.\d+)?/g) ?? [];
-  return matches.map((match) => Number(match));
+  const matches = text.match(NUMBER_PATTERN) ?? [];
+  return matches.map((match) => Number(match.replace(/,/g, '')));
 }
 
 const MATCH_EPSILON = 0.05;

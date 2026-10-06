@@ -67,6 +67,7 @@ const envSchema = z.object({
   GMAIL_CLASSIFIER_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
   GMAIL_CLASSIFIER_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(2),
   GMAIL_CLASSIFIER_PROMPT_VERSION: z.string().default('v1'),
+  WORK_ITEM_NOTIFICATION_RECIPIENT: z.preprocess((v) => v === '' ? undefined : v, z.string().email().optional()),
   // ServiceTitan
   SERVICETITAN_CLIENT_ID: z.string().default(''),
   SERVICETITAN_CLIENT_SECRET: z.string().default(''),
@@ -92,6 +93,16 @@ const envSchema = z.object({
   // well before the next scheduled ingestion would notice on its own.
   LACE_STUCK_RUN_REAPER_CRON: z.string().default('*/30 * * * *'),
   LACE_STUCK_RUN_THRESHOLD_MINUTES: z.coerce.number().default(60),
+
+  // ServiceTitan: previously had no automated scheduler at all - ingestion
+  // only ran from dev-only routes (403 outside NODE_ENV=development) or a
+  // manual POST trigger, so production never synced. Default: daily at 01:00
+  // for the 9 regular entities. Business Units are a small, mostly-static
+  // settings list, so they sync far less often (weekly, Sunday 01:30).
+  SERVICETITAN_SYNC_CRON: z.string().default('0 1 * * *'),
+  SERVICETITAN_BUSINESS_UNIT_SYNC_CRON: z.string().default('30 1 * * 0'),
+  SERVICETITAN_STUCK_RUN_REAPER_CRON: z.string().default('*/30 * * * *'),
+  SERVICETITAN_STUCK_RUN_THRESHOLD_MINUTES: z.coerce.number().default(60),
 
   // Detect layer thresholds (SPEC-BI-001 exact values not confirmed yet -
   // these are reasonable defaults, deliberately env-tunable so they can be
@@ -124,6 +135,13 @@ const envSchema = z.object({
   // average (min sample count below avoids flagging a single small memo).
   DETECT_F04D_CREDITMEMO_SPIKE_MULTIPLIER: z.coerce.number().default(2),
   DETECT_F04D_CREDITMEMO_MIN_SAMPLE: z.coerce.number().default(3),
+  // F-05: alert when ServiceTitan's and QuickBooks' recorded revenue for
+  // invoices issued in the current 7-day window diverge by at least this
+  // many percentage points (of ServiceTitan's total) - ServiceTitan is the
+  // operational system of record, QuickBooks is supposed to reconcile
+  // against it, so a persistent gap signals a sync/booking problem.
+  DETECT_F05_REVENUE_GAP_THRESHOLD_POINTS: z.coerce.number().default(10),
+  DETECT_F05_MIN_REVENUE: z.coerce.number().default(1000),
 
   // Narrate layer: LLM writes prose describing detected_alerts findings only -
   // it never recomputes numbers (SPEC-BI-001 Section 4.1).

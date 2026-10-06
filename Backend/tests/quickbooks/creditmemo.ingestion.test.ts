@@ -3,6 +3,11 @@ import { db } from '../../src/database';
 import { QboCreditMemoIngestionService } from '../../src/modules/quickbooks/ingestion/creditmemo.ingestion';
 
 describe('QBO CreditMemo raw ingestion', () => {
+  // The default 5s timeout is occasionally too tight for this DB connection's
+  // round-trip latency (advisory lock + several sequential queries per
+  // page) - bump it rather than let the suite flake on infra timing.
+  jest.setTimeout(30000);
+
   beforeEach(async () => { await db('raw_qbo_creditmemos').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'CreditMemos' }).delete(); });
   afterAll(async () => { await db('raw_qbo_creditmemos').delete(); await db('raw_sync_metadata').where({ source_system: 'QuickBooks', entity_type: 'CreditMemos' }).delete(); await db.destroy(); });
 

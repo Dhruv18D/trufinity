@@ -34,6 +34,9 @@ describe('Gmail classification hook', () => {
 
   it('fails safely when enabled configuration is incomplete', async () => {
     const classifier = { classify: jest.fn() };
-    await expect(new DefaultGmailClassificationHook(classifier as any, true, undefined).classifyMessage(authorization(), message())).rejects.toThrow('confidence threshold');
+    const hook = new DefaultGmailClassificationHook(classifier as any, true, 0.8);
+    (hook as any).threshold = undefined;
+    await expect(hook.classifyMessage(authorization(), message())).rejects.toThrow('confidence threshold');
+    expect(classifier.classify).not.toHaveBeenCalled();
   });
 });
