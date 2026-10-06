@@ -37,4 +37,28 @@ describe('email classifier domain contract', () => {
     expect(deriveEmailDecision({ label: 'complaint', confidence: 0.49, reason: 'ok' }, 0.5).state).toBe('REVIEW_REQUIRED');
     expect(deriveEmailDecision({ label: 'none', confidence: 1, reason: 'ok' }, 0.5).state).toBe('NONE');
   });
+
+  test('label none always produces NONE regardless of confidence', () => {
+    expect(deriveEmailDecision({ label: 'none', confidence: 0, reason: 'ok' }, 0.85).state).toBe('NONE');
+    expect(deriveEmailDecision({ label: 'none', confidence: 0.85, reason: 'ok' }, 0.85).state).toBe('NONE');
+    expect(deriveEmailDecision({ label: 'none', confidence: 1, reason: 'ok' }, 0.85).state).toBe('NONE');
+  });
+
+  test('threshold boundary at 0.85', () => {
+    const r = 'ok';
+    expect(deriveEmailDecision({ label: 'complaint', confidence: 0.85, reason: r }, 0.85).state).toBe('ESCALATION');
+    expect(deriveEmailDecision({ label: 'complaint', confidence: 0.8499, reason: r }, 0.85).state).toBe('REVIEW_REQUIRED');
+    expect(deriveEmailDecision({ label: 'complaint', confidence: 0.8501, reason: r }, 0.85).state).toBe('ESCALATION');
+  });
+
+  test('confidence extremes with non-none labels', () => {
+    expect(deriveEmailDecision({ label: 'complaint', confidence: 0, reason: 'ok' }, 0.85).state).toBe('REVIEW_REQUIRED');
+    expect(deriveEmailDecision({ label: 'complaint', confidence: 1, reason: 'ok' }, 0.85).state).toBe('ESCALATION');
+  });
+
+  test('rejects invalid threshold values', () => {
+    expect(() => deriveEmailDecision({ label: 'complaint', ...base }, -0.01)).toThrow('Confidence threshold');
+    expect(() => deriveEmailDecision({ label: 'complaint', ...base }, 1.01)).toThrow('Confidence threshold');
+    expect(() => deriveEmailDecision({ label: 'complaint', ...base }, NaN)).toThrow('Confidence threshold');
+  });
 });
