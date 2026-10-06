@@ -106,7 +106,7 @@ function collectAllowedNumbers(payload: Record<string, unknown>): Set<number> {
       // The model reasonably echoes these back, so they must count as
       // allowed too - otherwise validation fails unpredictably depending on
       // whether the model happens to write a window size etc. as a digit.
-      for (const match of value.match(/-?\d+(\.\d+)?/g) ?? []) allowed.add(Number(match));
+      for (const match of extractNumbers(value)) allowed.add(match);
       return;
     }
     if (Array.isArray(value)) {
@@ -122,9 +122,15 @@ function collectAllowedNumbers(payload: Record<string, unknown>): Set<number> {
   return allowed;
 }
 
+// Thousands-grouped numbers (e.g. "1,091") must be matched whole, before the
+// plain-number alternative - otherwise a greedy single-digit-group match
+// would read "1,091" as two separate numbers, 1 and 91, and the real value
+// 1091 would never appear in either the narrative or the allowed set.
+const NUMBER_PATTERN = /-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?/g;
+
 function extractNumbers(text: string): number[] {
-  const matches = text.match(/-?\d+(\.\d+)?/g) ?? [];
-  return matches.map((match) => Number(match));
+  const matches = text.match(NUMBER_PATTERN) ?? [];
+  return matches.map((match) => Number(match.replace(/,/g, '')));
 }
 
 const MATCH_EPSILON = 0.05;

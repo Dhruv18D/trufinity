@@ -93,6 +93,16 @@ const envSchema = z.object({
   LACE_STUCK_RUN_REAPER_CRON: z.string().default('*/30 * * * *'),
   LACE_STUCK_RUN_THRESHOLD_MINUTES: z.coerce.number().default(60),
 
+  // ServiceTitan: previously had no automated scheduler at all - ingestion
+  // only ran from dev-only routes (403 outside NODE_ENV=development) or a
+  // manual POST trigger, so production never synced. Default: daily at 01:00
+  // for the 9 regular entities. Business Units are a small, mostly-static
+  // settings list, so they sync far less often (weekly, Sunday 01:30).
+  SERVICETITAN_SYNC_CRON: z.string().default('0 1 * * *'),
+  SERVICETITAN_BUSINESS_UNIT_SYNC_CRON: z.string().default('30 1 * * 0'),
+  SERVICETITAN_STUCK_RUN_REAPER_CRON: z.string().default('*/30 * * * *'),
+  SERVICETITAN_STUCK_RUN_THRESHOLD_MINUTES: z.coerce.number().default(60),
+
   // Detect layer thresholds (SPEC-BI-001 exact values not confirmed yet -
   // these are reasonable defaults, deliberately env-tunable so they can be
   // corrected without a code change once the spec's exact numbers are known).
