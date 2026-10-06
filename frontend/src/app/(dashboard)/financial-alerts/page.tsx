@@ -21,7 +21,7 @@ export default async function FinancialAlertsPage({ searchParams }: { searchPara
     <div>
       <PageHeader
         title="Financial Alerts"
-        description="AR aging, AR concentration, discount leakage and credit memo spikes detected from QuickBooks data, newest first."
+        description="AR aging, AR concentration, discount leakage, credit memo spikes and revenue reconciliation gaps detected from QuickBooks and ServiceTitan data, newest first."
         action={<DateRangePicker prefix={ALERTS_FILTER_PREFIX} range={range} />}
       />
       <FilterChips

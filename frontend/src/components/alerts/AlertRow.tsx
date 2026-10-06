@@ -39,8 +39,8 @@ export function AlertRow({ alert }: { alert: DetectedAlert }) {
         <ClampedText text={alertSummary(alert)} className="text-sm text-foreground/70" />
         <div className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-foreground/45">
           <span>
-            {meta.metricLabel} {formatMetric(alert.metric_value, meta.metricFormat)} · baseline{" "}
-            {formatMetric(alert.baseline_value, meta.metricFormat)}
+            {meta.metricLabel} {formatMetric(alert.metric_value, meta.metricFormat)}
+            {alert.baseline_value != null && <> · baseline {formatMetric(alert.baseline_value, meta.metricFormat)}</>}
           </span>
           <span>Detected {formatDateTime(alert.detected_at)} PT</span>
           {!alert.narrative && <span className="italic">Narrative pending</span>}

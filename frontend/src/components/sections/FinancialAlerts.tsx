@@ -4,7 +4,7 @@ import { listAlerts, type DetectedAlert } from "@/lib/api/alerts";
 import { getRuleMeta } from "@/lib/rules";
 import type { DateRange } from "@/lib/filters";
 
-/** F-series alerts from QuickBooks (F-03 discount leakage, F-04 AR aging, F-04c AR concentration, F-04d credit memos), default month-to-date. */
+/** F-series alerts (F-03 discount leakage, F-04 AR aging, F-04c AR concentration, F-04d credit memos, F-05 revenue reconciliation), default month-to-date. */
 export async function FinancialAlerts({ ruleCode, limit, range = {} }: { ruleCode?: string; limit?: number; range?: DateRange }) {
   let alerts: DetectedAlert[];
   try {
@@ -21,7 +21,7 @@ export async function FinancialAlerts({ ruleCode, limit, range = {} }: { ruleCod
       <EmptyState
         icon="check-circle"
         title="No financial alerts"
-        description={`${ruleCode ? `No ${ruleCode} exceptions` : "No AR, discount or credit memo exceptions"} detected in this period.`}
+        description={`${ruleCode ? `No ${ruleCode} exceptions` : "No AR, discount, credit memo or revenue reconciliation exceptions"} detected in this period.`}
       />
     );
   }

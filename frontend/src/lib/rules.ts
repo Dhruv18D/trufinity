@@ -14,6 +14,8 @@ export interface RuleMeta {
   severity: RuleSeverity;
   metricLabel: string;
   metricFormat: MetricFormat;
+  /** Display format for specific `details` keys (anything not listed renders as-is). */
+  detailFormats?: Record<string, MetricFormat>;
 }
 
 export const rules: Record<string, RuleMeta> = {
@@ -40,30 +42,48 @@ export const rules: Record<string, RuleMeta> = {
     severity: "amber",
     metricLabel: "Discount-to-gross",
     metricFormat: "ratio",
+    detailFormats: {
+      currentGrossAmount: "money",
+      currentDiscountAmount: "money",
+      baselineGrossAmount: "money",
+      baselineDiscountAmount: "money",
+    },
   },
   "F-04": {
     code: "F-04",
-    label: "AR aging deterioration",
+    label: "AR aging spike",
     section: "financial",
     severity: "amber",
     metricLabel: "Overdue invoice share",
     metricFormat: "ratio",
+    detailFormats: { currentOverdueBalance: "money", baselineOverdueBalance: "money" },
   },
   "F-04c": {
     code: "F-04c",
-    label: "Large-balance concentration",
+    label: "AR concentration",
     section: "financial",
     severity: "amber",
     metricLabel: "Top customer share of AR",
     metricFormat: "ratio",
+    detailFormats: { topCustomerBalance: "money", totalOutstandingBalance: "money" },
   },
   "F-04d": {
     code: "F-04d",
-    label: "Credit memo or write-down issued",
+    label: "Credit memo spike",
     section: "financial",
     severity: "red",
     metricLabel: "Credit memos this week",
     metricFormat: "money",
+    detailFormats: { currentTotalAmount: "money", baselineTotalAmount: "money", baselineWeeklyAverage: "money" },
+  },
+  "F-05": {
+    code: "F-05",
+    label: "Revenue reconciliation gap",
+    section: "financial",
+    severity: "red",
+    metricLabel: "ST vs. QBO revenue gap",
+    metricFormat: "ratio",
+    detailFormats: { quickbooksRevenue: "money", serviceTitanRevenue: "money", gapAmount: "money" },
   },
 };
 
@@ -92,7 +112,8 @@ export const severityStyles: Record<RuleSeverity, string> = {
 
 /** Dimension values that are not a person/entity name. */
 const dimensionLabels: Record<string, string> = {
-  TENANT_TOTAL: "All CSRs (company total)",
+  // Used by both D-01 (all CSRs) and F-05 (whole company), so keep it generic.
+  TENANT_TOTAL: "Company total",
   QUICKBOOKS_TOTAL: "QuickBooks (company total)",
   SERVICETITAN_TOTAL: "ServiceTitan (company total)",
 };

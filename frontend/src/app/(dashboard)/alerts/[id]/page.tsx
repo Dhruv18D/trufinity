@@ -99,7 +99,9 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ id
             <dl className="divide-y divide-border-subtle">
               {details.map(([key, value]) => (
                 <Row key={key} label={humanizeKey(key)}>
-                  {formatDetailValue(value)}
+                  {meta.detailFormats?.[key] && (typeof value === "string" || typeof value === "number")
+                    ? formatMetric(String(value), meta.detailFormats[key])
+                    : formatDetailValue(value)}
                 </Row>
               ))}
             </dl>
