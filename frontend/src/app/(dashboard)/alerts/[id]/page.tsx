@@ -11,6 +11,7 @@ import { formatDimension, formatMetric, getRuleMeta } from "@/lib/rules";
 
 const sectionBack: Record<string, { href: string; label: string }> = {
   demand: { href: "/demand-alerts", label: "Demand Alerts" },
+  financial: { href: "/financial-alerts", label: "Financial Alerts" },
   escalations: { href: "/escalations", label: "Customer Escalations" },
   redFlags: { href: "/red-flags", label: "Red Flags" },
 };
@@ -71,7 +72,9 @@ export default async function AlertDetailPage({ params }: { params: Promise<{ id
 
         <div className="mt-5 grid grid-cols-2 gap-3">
           <MetricTile label={meta.metricLabel} value={formatMetric(alert.metric_value, meta.metricFormat)} />
-          <MetricTile label="Baseline" value={formatMetric(alert.baseline_value, meta.metricFormat)} />
+          {alert.baseline_value != null && (
+            <MetricTile label="Baseline" value={formatMetric(alert.baseline_value, meta.metricFormat)} />
+          )}
         </div>
       </Card>
 

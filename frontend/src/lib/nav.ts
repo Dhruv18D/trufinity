@@ -8,6 +8,7 @@ export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Main Dashboard", icon: "grid" },
   { href: "/daily-brief", label: "Daily Executive Brief", icon: "sun" },
   { href: "/demand-alerts", label: "Demand Alerts", icon: "bell" },
+  { href: "/financial-alerts", label: "Financial Alerts", icon: "alert-circle" },
   { href: "/field-operations", label: "Field Operations", icon: "building" },
   { href: "/scorecard", label: "Scorecard", icon: "bar-chart" },
   { href: "/escalations", label: "Customer Escalations", icon: "alert-circle" },

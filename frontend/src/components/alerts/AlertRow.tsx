@@ -18,10 +18,9 @@ export function RuleBadge({ code }: { code: string }) {
 export function alertSummary(alert: DetectedAlert): string {
   if (alert.narrative) return alert.narrative;
   const meta = getRuleMeta(alert.rule_code);
-  return `${meta.metricLabel}: ${formatMetric(alert.metric_value, meta.metricFormat)} vs. baseline ${formatMetric(
-    alert.baseline_value,
-    meta.metricFormat,
-  )}`;
+  const current = `${meta.metricLabel}: ${formatMetric(alert.metric_value, meta.metricFormat)}`;
+  // Point-in-time rules (e.g. F-04c) have no baseline.
+  return alert.baseline_value == null ? current : `${current} vs. baseline ${formatMetric(alert.baseline_value, meta.metricFormat)}`;
 }
 
 export function AlertRow({ alert }: { alert: DetectedAlert }) {

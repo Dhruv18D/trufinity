@@ -3,7 +3,7 @@ import { formatDecimal, formatMoney, formatRatio } from "./format";
 // Single lookup for rule codes (spec Section 5). New codes (F-*, E-*, O-*, R-*, M-*, P-*) get added here only.
 
 export type RuleSeverity = "red" | "amber" | "blue";
-export type RuleSection = "demand" | "escalations" | "redFlags" | "watchList" | "opportunities" | "responsiveness" | "marketing";
+export type RuleSection = "demand" | "financial" | "escalations" | "redFlags" | "watchList" | "opportunities" | "responsiveness" | "marketing";
 /** How metric_value / baseline_value should be displayed. */
 export type MetricFormat = "ratio" | "count" | "money" | "number";
 
@@ -21,7 +21,7 @@ export const rules: Record<string, RuleMeta> = {
     code: "D-01",
     label: "Booking rate decline",
     section: "demand",
-    severity: "amber",
+    severity: "red",
     metricLabel: "Booking rate",
     metricFormat: "ratio",
   },
@@ -32,6 +32,38 @@ export const rules: Record<string, RuleMeta> = {
     severity: "amber",
     metricLabel: "Objection rate",
     metricFormat: "ratio",
+  },
+  "F-03": {
+    code: "F-03",
+    label: "Discount leakage",
+    section: "financial",
+    severity: "amber",
+    metricLabel: "Discount-to-gross",
+    metricFormat: "ratio",
+  },
+  "F-04": {
+    code: "F-04",
+    label: "AR aging deterioration",
+    section: "financial",
+    severity: "amber",
+    metricLabel: "Overdue invoice share",
+    metricFormat: "ratio",
+  },
+  "F-04c": {
+    code: "F-04c",
+    label: "Large-balance concentration",
+    section: "financial",
+    severity: "amber",
+    metricLabel: "Top customer share of AR",
+    metricFormat: "ratio",
+  },
+  "F-04d": {
+    code: "F-04d",
+    label: "Credit memo or write-down issued",
+    section: "financial",
+    severity: "red",
+    metricLabel: "Credit memos this week",
+    metricFormat: "money",
   },
 };
 
@@ -59,8 +91,14 @@ export const severityStyles: Record<RuleSeverity, string> = {
 };
 
 /** Dimension values that are not a person/entity name. */
+const dimensionLabels: Record<string, string> = {
+  TENANT_TOTAL: "All CSRs (company total)",
+  QUICKBOOKS_TOTAL: "QuickBooks (company total)",
+  SERVICETITAN_TOTAL: "ServiceTitan (company total)",
+};
+
 export function formatDimension(dimension: string): string {
-  return dimension === "TENANT_TOTAL" ? "All CSRs (company total)" : dimension;
+  return dimensionLabels[dimension] ?? dimension;
 }
 
 export function formatMetric(value: string | null, format: MetricFormat): string {
