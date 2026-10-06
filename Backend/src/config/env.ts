@@ -134,6 +134,13 @@ const envSchema = z.object({
   // average (min sample count below avoids flagging a single small memo).
   DETECT_F04D_CREDITMEMO_SPIKE_MULTIPLIER: z.coerce.number().default(2),
   DETECT_F04D_CREDITMEMO_MIN_SAMPLE: z.coerce.number().default(3),
+  // F-05: alert when ServiceTitan's and QuickBooks' recorded revenue for
+  // invoices issued in the current 7-day window diverge by at least this
+  // many percentage points (of ServiceTitan's total) - ServiceTitan is the
+  // operational system of record, QuickBooks is supposed to reconcile
+  // against it, so a persistent gap signals a sync/booking problem.
+  DETECT_F05_REVENUE_GAP_THRESHOLD_POINTS: z.coerce.number().default(10),
+  DETECT_F05_MIN_REVENUE: z.coerce.number().default(1000),
 
   // Narrate layer: LLM writes prose describing detected_alerts findings only -
   // it never recomputes numbers (SPEC-BI-001 Section 4.1).

@@ -38,6 +38,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
   'F-04c': "A single customer's outstanding receivable balance makes up an outsized share of total outstanding accounts receivable.",
   'F-03': 'The aggregate discount rate on recently-issued QuickBooks invoices has risen compared to the trailing 4-week average.',
   'F-04d': 'The total dollar amount of QuickBooks credit memos issued in the current week has spiked compared to the trailing 4-week weekly average.',
+  'F-05': "ServiceTitan's and QuickBooks' recorded revenue for the current week's invoices diverge by more than the configured threshold.",
 };
 
 // Percentage-rate rules whose metric/baseline values are stored as fractions
@@ -45,7 +46,7 @@ const RULE_DESCRIPTIONS: Record<string, string> = {
 // means the model copies a number we already computed - it never does the
 // fraction-to-percent arithmetic itself (SPEC-BI-001 Section 9: the model
 // performs no arithmetic).
-const PERCENTAGE_RULES = new Set(['D-01', 'D-06', 'F-04', 'F-04c', 'F-03']);
+const PERCENTAGE_RULES = new Set(['D-01', 'D-06', 'F-04', 'F-04c', 'F-03', 'F-05']);
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;

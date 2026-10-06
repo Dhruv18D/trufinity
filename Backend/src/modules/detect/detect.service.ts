@@ -9,6 +9,7 @@ import { evaluateArAgingSpike } from './rules/f04-ar-aging-spike.rule';
 import { evaluateArConcentration } from './rules/f04c-ar-concentration.rule';
 import { evaluateDiscountLeakage } from './rules/f03-discount-leakage.rule';
 import { evaluateCreditMemoSpike } from './rules/f04d-creditmemo-spike.rule';
+import { evaluateRevenueReconciliationGap } from './rules/f05-revenue-reconciliation-gap.rule';
 
 async function persistFinding(database: Knex, finding: DetectedAlertFinding): Promise<void> {
   await database('detected_alerts')
@@ -36,16 +37,17 @@ export class DetectService {
   public async run(now: Date = new Date()): Promise<{ findings: DetectedAlertFinding[] }> {
     const window = trailingWeekWindow(now);
 
-    const [d01, d06, f04, f04c, f03, f04d] = await Promise.all([
+    const [d01, d06, f04, f04c, f03, f04d, f05] = await Promise.all([
       evaluateBookingRateDecline(window, this.database),
       evaluateObjectionCategorySpikes(window, this.database),
       evaluateArAgingSpike(window, this.database),
       evaluateArConcentration(window, this.database),
       evaluateDiscountLeakage(window, this.database),
       evaluateCreditMemoSpike(window, this.database),
+      evaluateRevenueReconciliationGap(window, this.database),
     ]);
 
-    const findings = [...d01, ...d06, ...f04, ...f04c, ...f03, ...f04d];
+    const findings = [...d01, ...d06, ...f04, ...f04c, ...f03, ...f04d, ...f05];
     for (const finding of findings) {
       await persistFinding(this.database, finding);
     }
