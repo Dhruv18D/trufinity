@@ -238,14 +238,17 @@ export class GmailHistoricalSyncService {
       
       (global as any).__GMAIL_SYNC_STAGE = 'historical synchronization';
       const cutoff = explicitCutoff ?? new Date(this.now() - this.historicalDays * 24 * 60 * 60 * 1000);
+      // Capture before scanning so changes during the scan are replayed by
+      // incremental sync rather than skipped by an end-of-scan checkpoint.
+      const profile = await withRetry(async () => authorization.client.users.getProfile({ userId: 'me' }));
+      const historyId = profile.data.historyId ? String(profile.data.historyId) : null;
+      if (!historyId) throw new Error(SAFE_FAILURE);
       const seenMessageIds = new Set<string>();
       for (const label of INCLUDED_LABELS) {
         const result = await this.scanLabel(authorization, mailbox, syncRunId, label, cutoff, seenMessageIds);
         processed += result.processed;
         persisted += result.persisted;
       }
-      const profile = await withRetry(async () => authorization.client.users.getProfile({ userId: 'me' }));
-      const historyId = profile.data.historyId ? String(profile.data.historyId) : null;
       await this.repository.completeMailbox(mailbox, syncRunId, processed, this.historicalDays, historyId);
       return { mailboxAddress: mailbox.normalizedMailboxAddress, contentMode: authorization.mailbox.contentMode, syncRunId, recordsProcessed: processed, recordsPersisted: persisted };
     } catch (error) {
@@ -291,10 +294,12 @@ export class GmailHistoricalSyncService {
         }
         if (message.labelIds.some((messageLabel) => EXCLUDED_LABELS.has(messageLabel))) continue;
         if (message.internalDate.getTime() < cutoff.getTime()) {
-          stop = true;
-          break;
+          continue;
         }
-        const classification = await this.classificationHook.classifyMessage(authorization, message, mailbox.id);
+        // METADATA ingestion must never enter the Layer B hook.
+        const classification = authorization.mailbox.contentMode === 'CONTENT'
+          ? await this.classificationHook.classifyMessage(authorization, message, mailbox.id)
+          : null;
         if (classification) classifications.push(classification);
         writes.push({
           providerMessageId: message.id,
@@ -304,6 +309,10 @@ export class GmailHistoricalSyncService {
           internalDate: message.internalDate,
           providerHistoryId: message.historyId,
         });
+      }
+      if (errors.length > 0) {
+        await this.repository.commitBatch(mailbox, syncRunId, [], errors);
+        throw new Error(SAFE_FAILURE);
       }
       persisted += classifications.length > 0 ? await this.repository.commitBatch(mailbox, syncRunId, writes, errors, classifications) : await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
       processed += writes.length;
