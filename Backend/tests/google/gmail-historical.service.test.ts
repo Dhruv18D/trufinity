@@ -93,6 +93,45 @@ function createService(
 }
 
 describe('Gmail historical synchronization', () => {
+  it('captures the history baseline before message scans and never calls Layer B for METADATA', async () => {
+    const auth = createAuthorization('careers@trufinity.ca', 'METADATA', [{ messages: [{ id: 'm' }] }, { messages: [] }], { m: createMessage('m', NOW - 1, ['INBOX']) });
+    const observed = createRepository();
+    const hook = { classifyMessage: jest.fn<any>().mockRejectedValue(new Error('Layer B must not execute')) };
+    const service = new GmailHistoricalSyncService({ getGmailAuthorization: () => auth.authorization }, { discoverActiveMailboxes: async () => [{ normalizedAddress: 'careers@trufinity.ca' }] } as never, observed.repository, 365, () => NOW, hook);
+    const complete = jest.spyOn(observed.repository, 'completeMailbox');
+    await service.runMailbox('careers@trufinity.ca');
+    expect(hook.classifyMessage).not.toHaveBeenCalled();
+    const profile = auth.authorization.client.users.getProfile as jest.Mock;
+    expect(profile.mock.invocationCallOrder[0]).toBeLessThan(auth.list.mock.invocationCallOrder[0]);
+    expect(complete).toHaveBeenCalledWith(expect.anything(), 'run-1', 1, 365, '123456789');
+  });
+
+  it('leaves completion unchanged after malformed work and safely restarts the scan', async () => {
+    const auth = createAuthorization('careers@trufinity.ca', 'METADATA', [{ messages: [{ id: 'bad' }] }], {});
+    const observed = createRepository();
+    const service = createService(auth.authorization, observed.repository);
+    await expect(service.runMailbox('careers@trufinity.ca')).rejects.toThrow();
+    expect(observed.completed).toHaveLength(0);
+    expect(observed.committed[0].messages).toEqual([]);
+    expect(observed.failed).toHaveLength(1);
+    auth.list.mockResolvedValueOnce({ data: { messages: [{ id: 'bad' }] } }).mockResolvedValueOnce({ data: { messages: [] } });
+    auth.get.mockResolvedValue({ data: createMessage('bad', NOW - 1, ['INBOX']) });
+    await service.runMailbox('careers@trufinity.ca');
+    expect(observed.completed).toEqual([{ syncRunId: 'run-2', recordsProcessed: 1 }]);
+    expect(auth.list.mock.calls[1][0].pageToken).toBeUndefined();
+  });
+
+  it('does not mark partially committed ingestion complete after exhausted fetch retries', async () => {
+    const auth = createAuthorization('careers@trufinity.ca', 'METADATA', [{ messages: [{ id: 'good' }], nextPageToken: 'next' }, { messages: [{ id: 'failed' }] }], { good: createMessage('good', NOW - 1, ['INBOX']) });
+    auth.get.mockResolvedValueOnce({ data: createMessage('good', NOW - 1, ['INBOX']) }).mockRejectedValue(Object.assign(new Error('private provider content'), { response: { status: 503 } }));
+    const observed = createRepository();
+    await expect(createService(auth.authorization, observed.repository).runMailbox('careers@trufinity.ca')).rejects.toThrow();
+    expect(auth.get).toHaveBeenCalledTimes(4);
+    expect(observed.completed).toHaveLength(0);
+    expect(observed.committed.flatMap(batch => batch.messages)).toHaveLength(1);
+    expect(JSON.stringify(observed.failed)).not.toContain('private provider content');
+  });
+
   it('uses Inbox and Sent label scans, deduplicates cross-label messages, and never persists metadata body/snippet data', async () => {
     const messages = {
       inbox: createMessage('inbox', NOW - 1, ['INBOX'], { headers: [{ name: 'Subject', value: 'metadata subject' }], body: { data: base64('must not persist') } }),
@@ -140,21 +179,23 @@ describe('Gmail historical synchronization', () => {
     expect(JSON.stringify(payload)).not.toContain('never store binary');
   });
 
-  it('stops an ordered label traversal after the historical cutoff is crossed', async () => {
+  it('continues pagination after old messages so unordered newer messages are not skipped', async () => {
     const messages = {
       current: createMessage('current', CUTOFF + 1, ['INBOX']),
       old: createMessage('old', CUTOFF - 1, ['INBOX']),
+      newer: createMessage('newer', NOW - 1, ['INBOX']),
     };
     const auth = createAuthorization('careers@trufinity.ca', 'METADATA', [
       { messages: [{ id: 'current' }, { id: 'old' }], nextPageToken: 'must-not-use' },
+      { messages: [{ id: 'newer' }] },
       { messages: [] },
     ], messages);
     const observed = createRepository();
 
     await createService(auth.authorization, observed.repository).runMailbox('careers@trufinity.ca');
 
-    expect(auth.list).toHaveBeenCalledTimes(2);
-    expect(observed.committed.flatMap((batch) => batch.messages.map((write) => write.providerMessageId))).toEqual(['current']);
+    expect(auth.list).toHaveBeenCalledTimes(3);
+    expect(observed.committed.flatMap((batch) => batch.messages.map((write) => write.providerMessageId))).toEqual(['current', 'newer']);
   });
 
   it('excludes Draft, Spam, and Trash even if returned by an included-label scan', async () => {

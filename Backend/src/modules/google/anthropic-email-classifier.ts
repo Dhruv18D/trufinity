@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../../config/env';
 import {
+  EMAIL_CLASSIFICATION_LABELS,
   EmailClassification,
   EmailClassifier,
   EmailClassifierInput,
@@ -20,8 +21,30 @@ export interface AnthropicMessagesClient {
       max_tokens: number;
       system: string;
       messages: { role: 'user'; content: string }[];
-    }): Promise<{ content: { type: string; text?: string }[] }>;
+      /** Structured-output constraint; constrains Claude to emit JSON matching the schema. */
+      output_config?: {
+        format?: {
+          type: 'json_schema';
+          schema: Record<string, unknown>;
+        } | null;
+      };
+    }): Promise<{
+      /** SDK stop-reason enum; safe to inspect as a fixed string. */
+      stop_reason: string | null;
+      content: { type: string; text?: string }[];
+      usage?: { input_tokens?: number; output_tokens?: number };
+    }>;
   };
+}
+
+export interface ClassifierTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface ClassifiedEmailWithUsage {
+  classification: EmailClassification;
+  usage: ClassifierTokenUsage;
 }
 
 export interface AnthropicEmailClassifierConfig {
@@ -31,10 +54,47 @@ export interface AnthropicEmailClassifierConfig {
   promptVersion: string;
 }
 
+/**
+ * Safe diagnostic category for a classifier failure. Captures only non-content
+ * metadata (HTTP status, SDK error class, network code, stop reason enum).
+ * Never exposes Claude response text, Gmail content, prompts, or credentials.
+ *
+ * Granular invalid-output subtypes allow the controlled CLI to identify the
+ * exact cause (truncation, code fence, extra fields, bad label, etc.) without
+ * logging any model-generated or email content.
+ */
+export type EmailClassifierFailureCategory =
+  // granular invalid-output subtypes
+  | 'response_truncated'       // stop_reason === 'max_tokens'
+  | 'no_text_block'            // response has no content block with type === 'text'
+  | 'json_parse_failure'       // response text is not valid JSON (e.g. code-fenced)
+  | 'unsupported_fields'       // JSON has extra keys beyond label/confidence/reason
+  | 'invalid_label'            // label is not a recognised enum value
+  | 'invalid_confidence'       // confidence is not a finite number in [0, 1]
+  | 'invalid_reason'           // reason is empty, multiline, or > MAX_REASON_LENGTH
+  | 'invalid_structured_output' // any other schema-validation failure (fallback)
+  // provider-side failure subtypes
+  | 'provider_auth_error'
+  | 'provider_model_error'
+  | 'provider_rate_limit'
+  | 'provider_timeout'
+  | 'provider_network_error'
+  | 'provider_server_error'
+  | 'provider_http_error'
+  | 'provider_unknown';
+
 export class EmailClassifierError extends Error {
-  constructor(message: string) {
+  public readonly category: EmailClassifierFailureCategory;
+  public readonly providerStatus: number | null;
+  constructor(
+    message: string,
+    category: EmailClassifierFailureCategory = 'provider_unknown',
+    providerStatus: number | null = null,
+  ) {
     super(message);
     this.name = 'EmailClassifierError';
+    this.category = category;
+    this.providerStatus = providerStatus;
   }
 }
 
@@ -52,9 +112,63 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+/**
+ * Extracts safe, non-content diagnostic fields from a provider SDK error.
+ * Never reads response body text, error message content, or request fields.
+ */
+function categorizeProviderError(error: unknown): { category: EmailClassifierFailureCategory; providerStatus: number | null } {
+  if (!error || typeof error !== 'object') return { category: 'provider_unknown', providerStatus: null };
+  const candidate = error as { code?: unknown; status?: unknown; response?: { status?: unknown } };
+  const status: number | null =
+    typeof candidate.response?.status === 'number' ? candidate.response.status :
+    typeof candidate.status === 'number' ? candidate.status :
+    null;
+  const code = typeof candidate.code === 'string' ? candidate.code : null;
+  if (status === 401 || status === 403) return { category: 'provider_auth_error', providerStatus: status };
+  if (status === 404) return { category: 'provider_model_error', providerStatus: status };
+  if (status === 408 || code === 'ETIMEDOUT') return { category: 'provider_timeout', providerStatus: status };
+  if (status === 429) return { category: 'provider_rate_limit', providerStatus: status };
+  if (status !== null && status >= 500) return { category: 'provider_server_error', providerStatus: status };
+  if (status !== null) return { category: 'provider_http_error', providerStatus: status };
+  if (code === 'ECONNRESET' || code === 'EAI_AGAIN') return { category: 'provider_network_error', providerStatus: null };
+  return { category: 'provider_unknown', providerStatus: null };
+}
+
 function buildPrompt(input: EmailClassifierInput): string {
   return `Classify this email. Subject and body are transient input and must not be repeated outside the JSON result.\nSubject: ${JSON.stringify(input.subject)}\nBody: ${JSON.stringify(input.bodyText)}`;
 }
+
+/**
+ * JSON Schema passed via output_config.format to constrain Claude's response
+ * to valid JSON with exactly the fields our validator expects. This prevents
+ * code-fenced output, prose preambles, and extra fields without changing any
+ * classification business logic or validation rules.
+ *
+ * Anthropic's structured-output JSON Schema does NOT support numerical
+ * constraints (minimum/maximum) or string constraints (minLength/maxLength).
+ * Using them returns HTTP 400. The API-level schema therefore constrains only
+ * structure, types, enum values, required fields, and additionalProperties.
+ *
+ * Stricter business constraints (confidence range, reason length/single-line)
+ * are enforced by parseEmailClassification() in the application layer.
+ */
+const EMAIL_CLASSIFICATION_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    label: {
+      type: 'string',
+      enum: [...EMAIL_CLASSIFICATION_LABELS],
+    },
+    confidence: {
+      type: 'number',
+    },
+    reason: {
+      type: 'string',
+    },
+  },
+  required: ['label', 'confidence', 'reason'],
+  additionalProperties: false,
+} as const;
 
 export class AnthropicEmailClassifier implements EmailClassifier {
   constructor(
@@ -68,6 +182,11 @@ export class AnthropicEmailClassifier implements EmailClassifier {
   }
 
   async classify(input: EmailClassifierInput): Promise<EmailClassification> {
+    const result = await this.classifyWithUsage(input);
+    return result.classification;
+  }
+
+  async classifyWithUsage(input: EmailClassifierInput): Promise<ClassifiedEmailWithUsage> {
     if (!input || typeof input.subject !== 'string' || typeof input.bodyText !== 'string') {
       throw new EmailClassifierError('Email classifier input is invalid.');
     }
@@ -75,26 +194,80 @@ export class AnthropicEmailClassifier implements EmailClassifier {
       try {
         const response = await this.client.messages.create({
           model: this.config.model,
-          max_tokens: 200,
+          // 512 is a safe upper bound: the JSON payload (max ~350 chars) comfortably
+          // fits within 200 tokens, but 512 prevents any risk of truncation from
+          // prompt-overhead or model preamble on edge-case inputs.
+          max_tokens: 512,
           system: EMAIL_CLASSIFIER_SYSTEM_PROMPT,
           messages: [{ role: 'user', content: buildPrompt(input) }],
+          // Constrain Claude's response to valid JSON matching our schema.
+          // This prevents code-fenced output and extra fields without changing
+          // any classification or validation logic.
+          output_config: {
+            format: {
+              type: 'json_schema',
+              schema: EMAIL_CLASSIFICATION_JSON_SCHEMA,
+            },
+          },
         });
+
+        // Check stop_reason before attempting to parse; 'max_tokens' means the
+        // output was cut off and the JSON will be incomplete regardless of content.
+        if (response.stop_reason === 'max_tokens') {
+          throw new EmailClassifierError('Email classifier response was truncated.', 'response_truncated');
+        }
+
         const text = response.content.find((block) => block.type === 'text')?.text;
-        if (!text) throw new EmailClassifierError('Email classifier returned invalid structured output.');
+        if (!text) {
+          throw new EmailClassifierError('Email classifier returned no text block.', 'no_text_block');
+        }
+
         let parsed: unknown;
-        try { parsed = JSON.parse(text); } catch { throw new EmailClassifierError('Email classifier returned invalid structured output.'); }
-        try { return parseEmailClassification(parsed); }
-        catch (error) {
-          if (error instanceof EmailClassificationValidationError) throw new EmailClassifierError('Email classifier returned invalid structured output.');
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          throw new EmailClassifierError('Email classifier response was not valid JSON.', 'json_parse_failure');
+        }
+
+        try {
+          const classification = parseEmailClassification(parsed);
+          const usage = response.usage;
+          return {
+            classification,
+            usage: {
+              inputTokens: typeof usage?.input_tokens === 'number' && Number.isFinite(usage.input_tokens) ? usage.input_tokens : 0,
+              outputTokens: typeof usage?.output_tokens === 'number' && Number.isFinite(usage.output_tokens) ? usage.output_tokens : 0,
+            },
+          };
+        } catch (error) {
+          if (error instanceof EmailClassificationValidationError) {
+            // Map each validation failure to its specific safe category.
+            const msg = error.message;
+            let category: EmailClassifierFailureCategory = 'invalid_structured_output';
+            if (msg.includes('unsupported fields')) category = 'unsupported_fields';
+            else if (msg.includes('unsupported label')) category = 'invalid_label';
+            else if (msg.includes('confidence')) category = 'invalid_confidence';
+            else if (msg.includes('reason')) category = 'invalid_reason';
+            throw new EmailClassifierError('Email classifier returned invalid structured output.', category);
+          }
           throw error;
         }
       } catch (error) {
-        if (error instanceof EmailClassifierError && error.message === 'Email classifier returned invalid structured output.') throw error;
+        // Non-retryable invalid-output categories: throw immediately, never retry.
+        if (error instanceof EmailClassifierError) {
+          const nonRetryableOutputCategories: EmailClassifierFailureCategory[] = [
+            'response_truncated', 'no_text_block', 'json_parse_failure',
+            'unsupported_fields', 'invalid_label', 'invalid_confidence',
+            'invalid_reason', 'invalid_structured_output',
+          ];
+          if (nonRetryableOutputCategories.includes(error.category)) throw error;
+        }
         if (attempt < this.config.maxRetries && isRetryable(error)) {
           await this.waitFn(100 * 2 ** attempt);
           continue;
         }
-        throw new EmailClassifierError('Email classifier provider request failed.');
+        const { category, providerStatus } = categorizeProviderError(error);
+        throw new EmailClassifierError('Email classifier provider request failed.', category, providerStatus);
       }
     }
   }

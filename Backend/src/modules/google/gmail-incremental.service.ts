@@ -206,7 +206,9 @@ export class GmailIncrementalSyncService {
                           !message.labelIds.some(label => EXCLUDED_LABELS.has(label));
                           
           if (inScope) {
-            const classification = await this.classificationHook.classifyMessage(authorization, message, mailbox.id);
+            const classification = authorization.mailbox.contentMode === 'CONTENT'
+              ? await this.classificationHook.classifyMessage(authorization, message, mailbox.id)
+              : null;
             if (classification) classifications.push(classification);
             writes.push({
               providerMessageId: message.id,
@@ -248,6 +250,13 @@ export class GmailIncrementalSyncService {
       }
 
       (global as any).__GMAIL_SYNC_STAGE = 'batch commit';
+      if (errors.length > 0) {
+        // Persist only sanitized diagnostics for an incomplete page. Keep the
+        // previous checkpoint and replay all pages on the next run; previously
+        // committed pages use the repository's identical-payload deduplication.
+        await this.repository.commitBatch(mailbox, syncRunId, [], errors);
+        throw new Error(SAFE_FAILURE);
+      }
       persisted += classifications.length > 0 ? await this.repository.commitBatch(mailbox, syncRunId, writes, errors, classifications) : await this.repository.commitBatch(mailbox, syncRunId, writes, errors);
       processed += writes.length;
       

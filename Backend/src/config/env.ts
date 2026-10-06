@@ -67,6 +67,7 @@ const envSchema = z.object({
   GMAIL_CLASSIFIER_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(10000),
   GMAIL_CLASSIFIER_MAX_RETRIES: z.coerce.number().int().min(0).max(3).default(2),
   GMAIL_CLASSIFIER_PROMPT_VERSION: z.string().default('v1'),
+  WORK_ITEM_NOTIFICATION_RECIPIENT: z.preprocess((v) => v === '' ? undefined : v, z.string().email().optional()),
   // ServiceTitan
   SERVICETITAN_CLIENT_ID: z.string().default(''),
   SERVICETITAN_CLIENT_SECRET: z.string().default(''),

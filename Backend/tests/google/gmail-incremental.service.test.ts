@@ -4,6 +4,7 @@ import { gmailHistoricalSyncService } from '../../src/modules/google/gmail-histo
 import { googleWorkspaceAuthService } from '../../src/modules/google/google-auth.service';
 import { googleWorkspaceDirectoryService } from '../../src/modules/google/workspace-directory.service';
 import { gmailHistoricalRepository } from '../../src/modules/google/gmail-historical.repository';
+import { gmailClassificationHook } from '../../src/modules/google/gmail-classification.service';
 
 jest.mock('../../src/modules/google/google-auth.service');
 jest.mock('../../src/modules/google/workspace-directory.service', () => {
@@ -78,9 +79,12 @@ describe('GmailIncrementalSyncService', () => {
   });
 
   it('1. messagesAdded', async () => {
+    const classify = jest.spyOn(gmailClassificationHook, 'classifyMessage');
     mockHistoryList.mockResolvedValue({ data: { history: [{ messagesAdded: [{ message: { id: 'msg-1' } }] }], historyId: '1001' } });
     mockMessagesGet.mockResolvedValue({ data: { id: 'msg-1', threadId: 'thread-1', labelIds: ['INBOX'], internalDate: '123456789', historyId: '1001', payload: { headers: [] } } });
     await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+    expect(classify).not.toHaveBeenCalled();
+    classify.mockRestore();
     expect(mockMessagesGet).toHaveBeenCalledWith({ userId: 'me', id: 'msg-1', format: 'metadata' });
     expect(gmailHistoricalRepository.commitBatch).toHaveBeenCalledWith(
       expect.anything(), mockSyncRunId,
@@ -230,11 +234,15 @@ describe('GmailIncrementalSyncService', () => {
       expect(stage()).toBe('sync-run creation');
     });
 
-    it('per-message fetch errors are recorded and the run proceeds to checkpoint completion', async () => {
+    it('per-message fetch errors are recorded and prevent checkpoint completion', async () => {
       mockHistoryList.mockResolvedValue({ data: { history: [{ messagesAdded: [{ message: { id: 'm1' } }] }], historyId: '1001' } });
       mockMessagesGet.mockRejectedValue(new Error('boom'));
-      await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
-      expect(stage()).toBe('checkpoint completion');
+      await expect(gmailIncrementalSyncService.runMailbox(mockMailboxAddress)).rejects.toThrow();
+      expect(stage()).toBe('batch commit');
+      expect(gmailHistoricalRepository.completeIncrementalRun).not.toHaveBeenCalled();
+      expect(gmailHistoricalRepository.updateSyncMetadata).not.toHaveBeenCalled();
+      expect(gmailHistoricalRepository.commitBatch).toHaveBeenCalledWith(expect.anything(), mockSyncRunId, [], [expect.objectContaining({ sourceId: 'm1' })]);
+      expect(gmailHistoricalRepository.failSyncRun).toHaveBeenCalled();
     });
 
     it('labels batch commit', async () => {
@@ -327,6 +335,97 @@ describe('GmailIncrementalSyncService', () => {
   it('17. advisory-lock/concurrency behavior', async () => {
     await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
     expect(mockWithMailboxLock).toHaveBeenCalledWith(mockMailboxAddress, expect.any(Function));
+  });
+
+  describe('required-message checkpoint safety', () => {
+    const message = (id: string) => ({ data: { id, threadId: `thread-${id}`, labelIds: ['INBOX'], internalDate: '123456789', historyId: '1001', payload: { headers: [] } } });
+    const page = (id: string) => ({ data: { history: [{ messagesAdded: [{ message: { id } }] }], historyId: '1001' } });
+
+    it('advances after a transient fetch failure succeeds within bounded retries', async () => {
+      mockHistoryList.mockResolvedValue(page('retry'));
+      mockMessagesGet.mockRejectedValueOnce({ response: { status: 503 } }).mockResolvedValue(message('retry'));
+      await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+      expect(mockMessagesGet).toHaveBeenCalledTimes(2);
+      expect(gmailHistoricalRepository.completeIncrementalRun).toHaveBeenCalledWith(mockMailboxId, mockSyncRunId, '1001', 1);
+      expect(gmailHistoricalRepository.failSyncRun).not.toHaveBeenCalled();
+    });
+
+    it('exhausts three fetch attempts, preserves the checkpoint, and strips content from diagnostics', async () => {
+      const secret = 'PRIVATE_SUBJECT_BODY_SNIPPET';
+      const log = jest.spyOn(console, 'log').mockImplementation(() => {});
+      const errorLog = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        mockHistoryList.mockResolvedValue(page('failed'));
+        mockMessagesGet.mockRejectedValue(Object.assign(new Error(secret), { response: { status: 503, data: { subject: secret, body: secret } } }));
+        const failure = await gmailIncrementalSyncService.runMailbox(mockMailboxAddress).catch(e => e);
+        expect(failure).toBeInstanceOf(Error);
+        expect(mockMessagesGet).toHaveBeenCalledTimes(3);
+        expect(gmailHistoricalRepository.completeIncrementalRun).not.toHaveBeenCalled();
+        expect(gmailHistoricalRepository.updateSyncMetadata).not.toHaveBeenCalled();
+        expect(gmailHistoricalRepository.commitBatch).toHaveBeenCalledWith(expect.anything(), mockSyncRunId, [], [{ sourceId: 'failed', message: expect.stringContaining('503') }]);
+        expect(gmailHistoricalRepository.failSyncRun).toHaveBeenCalled();
+        expect(JSON.stringify([failure.message, failure.cause, (gmailHistoricalRepository.commitBatch as jest.Mock).mock.calls, (gmailHistoricalRepository.failSyncRun as jest.Mock).mock.calls, log.mock.calls, errorLog.mock.calls, warn.mock.calls])).not.toContain(secret);
+        expect(gmailHistoricalSyncService.runMailbox).not.toHaveBeenCalled();
+      } finally { log.mockRestore(); errorLog.mockRestore(); warn.mockRestore(); }
+    });
+
+    it('rejects malformed required message responses without advancing', async () => {
+      mockHistoryList.mockResolvedValue(page('malformed'));
+      mockMessagesGet.mockResolvedValue({ data: {} });
+      await expect(gmailIncrementalSyncService.runMailbox(mockMailboxAddress)).rejects.toThrow();
+      expect(gmailHistoricalRepository.completeIncrementalRun).not.toHaveBeenCalled();
+      expect(gmailHistoricalRepository.commitBatch).toHaveBeenCalledWith(expect.anything(), mockSyncRunId, [], [{ sourceId: 'malformed', message: 'Gmail message response was malformed.' }]);
+    });
+
+    it('replays earlier committed pages after failure using real repository deduplication', async () => {
+      const { KnexGmailHistoricalRepository } = jest.requireActual('../../src/modules/google/gmail-historical.repository') as typeof import('../../src/modules/google/gmail-historical.repository');
+      const rows = new Map<string, any>();
+      const inserts: any[] = [];
+      const trx = (table: string) => ({
+        where: (filter: any) => ({
+          first: async () => rows.get(filter.provider_message_id),
+          update: async () => 1,
+        }),
+        insert: async (row: any) => { if (table === 'raw_gmail_messages') { rows.set(row.provider_message_id, row); inserts.push(row); } },
+      });
+      const repository = new KnexGmailHistoricalRepository({ transaction: async (work: any) => work(trx) } as any);
+      (gmailHistoricalRepository.commitBatch as any).mockImplementation(repository.commitBatch.bind(repository));
+      mockHistoryList.mockImplementation(async ({ pageToken }: any) => pageToken ? page('second') : { ...page('first'), data: { ...page('first').data, nextPageToken: 'next' } });
+      let failing = true;
+      mockMessagesGet.mockImplementation(async ({ id }: any) => { if (id === 'second' && failing) throw new Error('fetch failed'); return message(id); });
+      await expect(gmailIncrementalSyncService.runMailbox(mockMailboxAddress)).rejects.toThrow();
+      expect(inserts.map(row => row.provider_message_id)).toEqual(['first']);
+      expect(gmailHistoricalRepository.completeIncrementalRun).not.toHaveBeenCalled();
+      failing = false;
+      await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+      expect(inserts.map(row => row.provider_message_id)).toEqual(['first', 'second']);
+      expect(mockHistoryList.mock.calls.map(([params]: any) => params.startHistoryId)).toEqual(['1000', '1000', '1000', '1000']);
+      expect(gmailHistoricalRepository.completeIncrementalRun).toHaveBeenCalledTimes(1);
+      expect(gmailHistoricalRepository.completeIncrementalRun).toHaveBeenCalledWith(mockMailboxId, mockSyncRunId, '1001', 2);
+      (gmailHistoricalRepository.commitBatch as any).mockReset().mockResolvedValue(1);
+    });
+
+    it('advances safely for explicit deletions and message-fetch 404 tombstones', async () => {
+      mockHistoryList.mockResolvedValue({ data: { history: [{ messagesDeleted: [{ message: { id: 'deleted' } }], messagesAdded: [{ message: { id: 'gone' } }] }], historyId: '1001' } });
+      mockMessagesGet.mockRejectedValue(Object.assign(new Error('not found'), { response: { status: 404 } }));
+      await gmailIncrementalSyncService.runMailbox(mockMailboxAddress);
+      expect(gmailHistoricalRepository.commitBatch).toHaveBeenCalledWith(expect.anything(), mockSyncRunId, expect.arrayContaining([expect.objectContaining({ providerMessageId: 'deleted', isDeleted: true }), expect.objectContaining({ providerMessageId: 'gone', isDeleted: true })]), []);
+      expect(gmailHistoricalRepository.completeIncrementalRun).toHaveBeenCalledWith(mockMailboxId, mockSyncRunId, '1001', 2);
+      expect(gmailHistoricalSyncService.runMailbox).not.toHaveBeenCalled();
+    });
+
+    it('fails one mailbox while completing only the other mailbox checkpoint', async () => {
+      const healthy = 'luke@trufinity.ca';
+      (googleWorkspaceDirectoryService.discoverActiveMailboxes as any).mockResolvedValue([{ normalizedAddress: mockMailboxAddress }, { normalizedAddress: healthy }]);
+      (googleWorkspaceAuthService.getGmailAuthorization as any).mockImplementation((address: string) => ({ subject: address, scope: 'https://www.googleapis.com/auth/gmail.metadata', mailbox: { normalizedAddress: address, contentMode: 'METADATA' }, client: { users: { history: { list: async () => page(address) }, messages: { get: async () => { if (address === mockMailboxAddress) throw new Error('failed'); return message(address); } } } } }));
+      (gmailHistoricalRepository.ensureMailbox as any).mockImplementation(async (mailbox: any) => ({ id: mailbox.normalizedAddress, normalizedMailboxAddress: mailbox.normalizedAddress }));
+      const result = await gmailIncrementalSyncService.runAllEligibleMailboxes();
+      expect(result.failed.map(item => item.mailboxAddress)).toEqual([mockMailboxAddress]);
+      expect(result.completed.map(item => item.mailboxAddress)).toEqual([healthy]);
+      expect(gmailHistoricalRepository.completeIncrementalRun).toHaveBeenCalledTimes(1);
+      expect(gmailHistoricalRepository.completeIncrementalRun).toHaveBeenCalledWith(healthy, mockSyncRunId, '1001', 1);
+    });
   });
 
   it('18. scheduler overlap prevention where practical', async () => {
