@@ -7,16 +7,13 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction
 ) => {
+  // Full diagnostics go to the server log (SQL, stack traces, filesystem paths).
+  // None of this is forwarded to the HTTP client in any environment.
   logger.error(`Error: ${err.message}`, { stack: err.stack });
 
-  // err.message can carry internal detail (S3 object keys, DB identifiers,
-  // ...) that shouldn't reach a client outside development - it's already
-  // logged above for operators.
-  const isDevelopment = process.env.NODE_ENV === 'development';
   res.status(500).json({
     status: 'error',
-    message: isDevelopment ? err.message || 'Internal Server Error' : 'Internal Server Error',
-    ...(isDevelopment && { stack: err.stack }),
+    message: 'Internal Server Error',
   });
 };
 
