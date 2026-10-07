@@ -183,9 +183,20 @@ if (!_env.success) {
 // See tests/jest.setup-env.js, which forces DB_NAME onto an isolated DB
 // before this file loads .env - this throw is the backstop if that override
 // is ever bypassed or misconfigured.
-if (_env.data.NODE_ENV === 'test' && !_env.data.DB_NAME.endsWith('_test')) {
+//
+// Checking NODE_ENV alone isn't enough: a real incident showed a test file
+// writing a mock narrative onto live production alerts because it was run
+// in a way that never set NODE_ENV=test in the first place (e.g. invoked
+// directly, outside the npm test / jest.config.js entry point that loads
+// tests/jest.setup-env.js via setupFiles) - so NODE_ENV stayed "development"
+// and this guard never fired. JEST_WORKER_ID is set by Jest's own worker
+// bootstrapping itself, before any user config (setupFiles, testEnvironment,
+// a stray/alternate jest config) runs - it catches "this process is a Jest
+// test run" regardless of whether our own NODE_ENV override executed.
+const isTestRuntime = _env.data.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined;
+if (isTestRuntime && !_env.data.DB_NAME.endsWith('_test')) {
   throw new Error(
-    `Refusing to run with NODE_ENV=test against database "${_env.data.DB_NAME}" - DB_NAME must end in "_test" ` +
+    `Refusing to run under a test runner against database "${_env.data.DB_NAME}" - DB_NAME must end in "_test" ` +
     'to prevent tests from writing to a real database. See tests/jest.setup-env.js.',
   );
 }

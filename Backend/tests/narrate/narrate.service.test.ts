@@ -39,13 +39,15 @@ afterAll(async () => {
   await db.destroy();
 });
 
-// NarrateService.run() intentionally operates on the whole detected_alerts
-// table (it must narrate every pending alert in production, not a filtered
-// slice) - so its aggregate { narrated, failed } counts are NOT assertable
-// here: Jest runs test files concurrently against the same shared dev
-// database, and Detect/Deliver tests insert their own unnarrated rows into
-// this same table at the same time. Every test below instead asserts the
-// outcome for the specific row(s) it created, looked up by id.
+// NarrateService.run() defaults to narrating every pending alert in the
+// table (production never scopes it) - but every call below passes an
+// explicit `ids` filter so it can NEVER touch another test file's rows, or
+// (if this process is ever accidentally pointed at a real database) any
+// real alert. A prior version of this file called run() unscoped, relying
+// only on this file's own year-bounded cleanup for isolation; that was the
+// proximate cause of a real incident where an unscoped run() narrated live
+// production alerts with this file's own mock text - see
+// tests/db-isolation.guard.test.ts and the `ids` option on NarrateService.run().
 describe('NarrateService', () => {
   beforeEach(async () => {
     // Bounded to this file's own year: other test files share this table concurrently.
@@ -57,7 +59,7 @@ describe('NarrateService', () => {
     const id = extractId(row);
     const fakeClient: NarrationClient = { narrate: jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockResolvedValue('Booking rate dropped from 80% to 50%.') };
 
-    await new NarrateService(fakeClient).run();
+    await new NarrateService(fakeClient).run({ ids: [id] });
 
     const updated = await db('detected_alerts').where({ id }).first();
     expect(updated.narrative).toBe('Booking rate dropped from 80% to 50%.');
@@ -69,11 +71,11 @@ describe('NarrateService', () => {
     const id = extractId(row);
     const narrateMock = jest.fn<(alert: DetectedAlertRow) => Promise<string>>().mockResolvedValue('should not be called for this row');
 
-    await new NarrateService({ narrate: narrateMock }).run();
+    await new NarrateService({ narrate: narrateMock }).run({ ids: [id] });
 
     const unchanged = await db('detected_alerts').where({ id }).first();
     expect(unchanged.narrative).toBe('Already narrated.');
-    expect(narrateMock.mock.calls.every((call) => call[0].id !== id)).toBe(true);
+    expect(narrateMock).not.toHaveBeenCalled();
   });
 
   it('counts a failure without blocking other alerts, and leaves the failed row unnarrated', async () => {
@@ -87,7 +89,7 @@ describe('NarrateService', () => {
         return 'Objection category spiked.';
       });
 
-    await new NarrateService({ narrate: narrateMock }).run();
+    await new NarrateService({ narrate: narrateMock }).run({ ids: [failingId, okId] });
 
     const failedRow = await db('detected_alerts').where({ id: failingId }).first();
     expect(failedRow.narrative).toBeNull();
@@ -106,7 +108,7 @@ describe('NarrateService', () => {
       }),
     };
 
-    await new NarrateService(fakeClient).run();
+    await new NarrateService(fakeClient).run({ ids: [id] });
 
     expect(captured?.details).toEqual({ dropPoints: 35 });
     expect(Number(captured?.metric_value)).toBeCloseTo(0.42);
@@ -123,7 +125,7 @@ describe('NarrateService', () => {
       ),
     };
 
-    await new NarrateService(fakeClient).run();
+    await new NarrateService(fakeClient).run({ ids: [id] });
 
     const updated = await db('detected_alerts').where({ id }).first();
     expect(updated.narrative).toBeNull();

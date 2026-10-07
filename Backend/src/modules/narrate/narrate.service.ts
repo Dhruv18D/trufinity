@@ -189,8 +189,18 @@ export class NarrateService {
   // Narrates every detected_alerts row that doesn't have a narrative yet.
   // Failures on one alert (including a failed numeric validation) don't
   // block the others.
-  public async run(): Promise<{ narrated: number; failed: number }> {
-    const pending: DetectedAlertRow[] = await this.database('detected_alerts').whereNull('narrative').select('*');
+  //
+  // `options.ids` restricts the run to specific row ids - production never
+  // passes this (it must narrate every pending alert), but tests exercising
+  // this method against a shared table must use it. A real incident showed
+  // an unscoped run() narrating live production alerts with a jest mock's
+  // placeholder text, because this method has no way to know which rows
+  // "belong" to the caller otherwise - see tests/db-isolation.guard.test.ts
+  // and the ids-filter usage in narrate.service.test.ts.
+  public async run(options: { ids?: string[] } = {}): Promise<{ narrated: number; failed: number }> {
+    let query = this.database('detected_alerts').whereNull('narrative');
+    if (options.ids) query = query.whereIn('id', options.ids);
+    const pending: DetectedAlertRow[] = await query.select('*');
 
     let narrated = 0;
     let failed = 0;
