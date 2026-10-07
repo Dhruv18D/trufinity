@@ -26,6 +26,7 @@ const flaggedItems: FlaggedItem[] = [];
 const quickLinks = [
   { href: "/daily-brief", label: "Daily Executive Brief", description: "Today's brief in the fixed spec section order", icon: "sun" },
   { href: "/demand-alerts", label: "Demand Alerts", description: "Booking-rate declines & objection spikes", icon: "bell" },
+  { href: "/financial-alerts", label: "Financial Alerts", description: "AR aging, concentration, discounts, credit memos & revenue gaps", icon: "alert-circle" },
   { href: "/field-operations", label: "Field Operations", description: "ServiceTitan jobs, invoices, AR aging & schedule", icon: "building" },
   { href: "/scorecard", label: "Scorecard", description: "KPIs vs. targets across the business", icon: "bar-chart" },
   { href: "/escalations", label: "Customer Escalations", description: "Problem emails, calls & reviews", icon: "alert-circle" },

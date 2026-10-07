@@ -18,10 +18,9 @@ export function RuleBadge({ code }: { code: string }) {
 export function alertSummary(alert: DetectedAlert): string {
   if (alert.narrative) return alert.narrative;
   const meta = getRuleMeta(alert.rule_code);
-  return `${meta.metricLabel}: ${formatMetric(alert.metric_value, meta.metricFormat)} vs. baseline ${formatMetric(
-    alert.baseline_value,
-    meta.metricFormat,
-  )}`;
+  const current = `${meta.metricLabel}: ${formatMetric(alert.metric_value, meta.metricFormat)}`;
+  // Point-in-time rules (e.g. F-04c) have no baseline.
+  return alert.baseline_value == null ? current : `${current} vs. baseline ${formatMetric(alert.baseline_value, meta.metricFormat)}`;
 }
 
 export function AlertRow({ alert }: { alert: DetectedAlert }) {
@@ -40,8 +39,8 @@ export function AlertRow({ alert }: { alert: DetectedAlert }) {
         <ClampedText text={alertSummary(alert)} className="text-sm text-foreground/70" />
         <div className="mt-1.5 flex flex-wrap gap-x-3 text-xs text-foreground/45">
           <span>
-            {meta.metricLabel} {formatMetric(alert.metric_value, meta.metricFormat)} · baseline{" "}
-            {formatMetric(alert.baseline_value, meta.metricFormat)}
+            {meta.metricLabel} {formatMetric(alert.metric_value, meta.metricFormat)}
+            {alert.baseline_value != null && <> · baseline {formatMetric(alert.baseline_value, meta.metricFormat)}</>}
           </span>
           <span>Detected {formatDateTime(alert.detected_at)} PT</span>
           {!alert.narrative && <span className="italic">Narrative pending</span>}
